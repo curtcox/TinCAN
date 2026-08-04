@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinCAN Console</title>
+<meta name="description" content="An interactive TinCAN node: join the acoustic bus, send frames and text, watch arbitration and error confinement.">
+<link rel="stylesheet" href="../../style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🥫</text></svg>">
+</head>
+<body>
+<div id="chrome"></div>
+
+<main class="wrap wide">
+  <h1 style="margin:0 0 .2rem;font-size:1.6rem;letter-spacing:-.02em">Console</h1>
+  <p style="margin:0 0 1.5rem;color:var(--dim)">
+    A full TinCAN node. It transmits, acknowledges, arbitrates and confines errors.
+    Open it on two devices in the same room, set them to the same band and timing profile,
+    and they form a bus. Open it on one device and it will transmit into an empty room,
+    go error-passive, and tell you nobody is listening — which is
+    <a href="../../spec/tincan-1.0.html#83-error-states">exactly what §8.3 says should happen</a>.
+  </p>
+
+  <div id="support"></div>
+
+  <div class="panel">
+    <div class="row">
+      <button id="start" class="primary">Join the bus</button>
+      <button id="stop" disabled>Leave</button>
+      <button id="mute" disabled>Mute transmit</button>
+      <span class="spacer"></span>
+      <span id="state" class="pill">offline</span>
+      <span id="errstate" class="pill">—</span>
+      <span id="queue" class="pill">queue 0</span>
+    </div>
+    <div id="warnings"></div>
+  </div>
+
+  <div class="grid side">
+    <div>
+      <div class="panel">
+        <h2>This node</h2>
+        <label class="field"><span>Callsign</span>
+          <input id="callsign" type="text" maxlength="6" placeholder="up to 6 characters"></label>
+        <label class="field"><span>Address (0–30)</span>
+          <input id="address" type="number" min="1" max="30" value="7"></label>
+        <label class="field"><span>Band</span><select id="band"></select></label>
+        <label class="field"><span>Bit timing</span><select id="profile"></select></label>
+        <label class="field"><span>Transmit level <b id="ampval">25%</b></span>
+          <input id="amp" type="range" min="2" max="60" value="25"></label>
+        <p class="note" id="phynote"></p>
+      </div>
+
+      <div class="panel">
+        <h2>Peers</h2>
+        <div id="peers" class="log" style="max-height:10rem"></div>
+        <div class="row" style="margin-top:.6rem">
+          <button id="announce" disabled>Announce</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Counters</h2>
+        <div class="stats">
+          <div class="stat"><span>sent</span><b id="csent">0</b></div>
+          <div class="stat"><span>received</span><b id="crecv">0</b></div>
+          <div class="stat"><span>arb. lost</span><b id="clost">0</b></div>
+          <div class="stat"><span>TEC</span><b id="ctec">0</b></div>
+          <div class="stat"><span>REC</span><b id="crec">0</b></div>
+          <div class="stat"><span>errors</span><b id="cerr">0</b></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Text</h2>
+        <div class="row">
+          <input id="text" type="text" placeholder="a message — segmented automatically if it does not fit in one frame" style="flex:1">
+          <button id="sendtext" class="primary" disabled>Send</button>
+        </div>
+        <p class="note" id="texthint">—</p>
+        <div class="log" id="chat" style="max-height:16rem"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Raw frame</h2>
+        <div class="grid cols-2">
+          <div>
+            <label class="field"><span>Identifier (hex)</span>
+              <input id="rid" type="text" value="0x123"></label>
+            <div class="row" style="margin-bottom:.7rem">
+              <label class="row tight" style="font-size:.8rem;color:var(--dim)">
+                <input type="checkbox" id="rext" style="width:auto"> extended (29-bit)</label>
+              <label class="row tight" style="font-size:.8rem;color:var(--dim)">
+                <input type="checkbox" id="rrtr" style="width:auto"> remote</label>
+              <label class="row tight" style="font-size:.8rem;color:var(--dim)">
+                <input type="checkbox" id="rfdf" style="width:auto"> FDF</label>
+            </div>
+          </div>
+          <div>
+            <label class="field"><span>Payload (hex, up to 8 octets without FDF)</span>
+              <input id="rdata" type="text" value="DE AD BE EF"></label>
+            <div class="row">
+              <button id="sendraw" disabled>Queue frame</button>
+              <button id="burst" disabled title="Queue four frames of different priority at once">Priority burst</button>
+              <button id="clearq" class="danger" disabled>Clear queue</button>
+            </div>
+          </div>
+        </div>
+        <p class="note" id="rawhint">—</p>
+      </div>
+
+      <div class="panel">
+        <div class="row" style="margin-bottom:.75rem">
+          <h2 style="margin:0">Bus log</h2>
+          <span class="spacer"></span>
+          <button id="clearlog" class="danger">Clear</button>
+        </div>
+        <div class="log" id="log" style="max-height:22rem"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="site">
+  TinCAN — <a href="../../">specification and apps</a> ·
+  <a href="https://github.com/curtcox/TinCAN">source</a>
+</footer>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

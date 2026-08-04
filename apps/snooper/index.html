@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinCAN Snooper</title>
+<meta name="description" content="Passive analyzer for a TinCAN acoustic bus: decodes frames from the microphone and shows the physical layer while it does it.">
+<link rel="stylesheet" href="../../style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>📻</text></svg>">
+</head>
+<body>
+<div id="chrome"></div>
+
+<main class="wrap wide">
+  <h1 style="margin:0 0 .2rem;font-size:1.6rem;letter-spacing:-.02em">Snooper</h1>
+  <p style="margin:0 0 1.5rem;color:var(--dim)">
+    A passive TinCAN analyzer. It listens on the microphone, recovers the bit clock,
+    decodes frames, and shows you the physical layer while it does it.
+    It conforms to the <b>Listener</b> profile of
+    <a href="../../spec/tincan-1.0.html#91-profiles">spec §9.1</a>: it never transmits,
+    so it never acknowledges, and every frame it decodes is destroyed by the
+    transmitter's acknowledgement-error flag. That is expected — see the note below the frame list.
+  </p>
+
+  <div id="support"></div>
+
+  <div class="panel">
+    <div class="row">
+      <button id="start" class="primary">Start listening</button>
+      <button id="stop" disabled>Stop</button>
+      <label class="row tight" style="font-size:.85rem;color:var(--dim)">
+        Band
+        <select id="band" style="width:auto"></select>
+      </label>
+      <label class="row tight" style="font-size:.85rem;color:var(--dim)">
+        Timing
+        <select id="profile" style="width:auto"></select>
+      </label>
+      <span class="spacer"></span>
+      <span id="state" class="pill">stopped</span>
+      <span id="carrier" class="pill">no carrier</span>
+    </div>
+    <div id="warnings"></div>
+  </div>
+
+  <div class="grid side">
+    <div>
+      <div class="panel">
+        <h2>Physical layer</h2>
+        <canvas id="meter" height="110"></canvas>
+        <div class="stats" style="margin-top:.8rem">
+          <div class="stat"><span>E_D / total</span><b id="ratio">—</b></div>
+          <div class="stat"><span>recessive</span><b id="er">—</b></div>
+          <div class="stat"><span>dominant</span><b id="ed">—</b></div>
+          <div class="stat"><span>noise floor</span><b id="nf">—</b></div>
+        </div>
+        <p class="note" id="phynote"></p>
+      </div>
+
+      <div class="panel">
+        <h2>Bus</h2>
+        <div class="stats">
+          <div class="stat"><span>frames</span><b id="nframes">0</b></div>
+          <div class="stat"><span>bus load</span><b id="load">0%</b></div>
+          <div class="stat"><span>bits seen</span><b id="nbits">0</b></div>
+          <div class="stat"><span>errors</span><b id="nerr">0</b></div>
+        </div>
+        <div class="row" style="margin-top:.8rem">
+          <span class="pill" id="rec">REC 0</span>
+          <span class="pill" id="errstate">error-active</span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>Errors</h2>
+        <div class="log" id="errlog" style="max-height:14rem"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Bit stream</h2>
+        <canvas id="bits" height="64"></canvas>
+        <p class="note">
+          One column per bit time, newest on the right.
+          <span class="dom">■</span> dominant &nbsp;
+          <span class="rec">■</span> recessive &nbsp;
+          <span class="muted">■</span> idle (no carrier).
+          Height shows E_D as a fraction of in-band energy; the line is <code>theta_D</code>.
+        </p>
+      </div>
+
+      <div class="panel">
+        <div class="row" style="margin-bottom:.75rem">
+          <h2 style="margin:0">Frames</h2>
+          <span class="spacer"></span>
+          <input id="filter" type="text" placeholder="filter: id, hex, text…" style="width:14rem">
+          <button id="export">Export JSONL</button>
+          <button id="clear" class="danger">Clear</button>
+        </div>
+        <div class="log" id="frames" style="max-height:32rem"></div>
+        <p class="note">
+          <b>delivered</b> means the frame survived to the end of EOF and at least one node
+          acknowledged it. <b>decoded</b> means the CRC checked out but the frame was
+          destroyed afterwards — which is what happens to every frame when the snooper is
+          the only other device in the room, because a listener never acknowledges.
+        </p>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="site">
+  TinCAN — <a href="../../">specification and apps</a> ·
+  <a href="https://github.com/curtcox/TinCAN">source</a>
+</footer>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

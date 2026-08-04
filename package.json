@@ -1,0 +1,41 @@
+{
+  "name": "tincan",
+  "version": "1.0.0-draft",
+  "description": "A CAN-inspired multi-master bus over sound, with true bitwise arbitration. Specification and reference implementation.",
+  "type": "module",
+  "homepage": "https://curtcox.github.io/TinCAN/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/curtcox/TinCAN.git"
+  },
+  "exports": {
+    ".": "./src/tincan/index.js",
+    "./modem": "./src/tincan/modem.js",
+    "./worklet": "./src/tincan/worklet.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/",
+    "spec/",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test 'test/*.test.mjs'",
+    "build": "node tools/build-site.mjs",
+    "serve": "node tools/build-site.mjs && python3 -m http.server 8080 --directory _site",
+    "dev": "python3 -m http.server 8080"
+  },
+  "keywords": [
+    "can-bus",
+    "acoustic",
+    "audio",
+    "modem",
+    "arbitration",
+    "protocol",
+    "web-audio",
+    "audioworklet"
+  ]
+}

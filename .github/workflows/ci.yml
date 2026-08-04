@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test on Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      # There are no dependencies to install. That is deliberate: the reference
+      # implementation and the site build are plain ES modules and Node's own
+      # test runner, so there is no lockfile to rot and nothing to audit.
+      - name: Check there is nothing to install
+        run: |
+          test ! -f package-lock.json || (echo "unexpected lockfile" && exit 1)
+          node -e "const p=require('./package.json');
+            if (p.dependencies || p.devDependencies) { console.error('TinCAN must stay dependency-free'); process.exit(1); }"
+
+      - name: Test
+        run: npm test
+
+      - name: Build the site
+        run: npm run build
+
+      - name: Check the built site
+        run: |
+          for f in _site/index.html _site/style.css _site/.nojekyll \
+                   _site/spec/tincan-1.0.html _site/spec/transport.html \
+                   _site/spec/rationale.html _site/spec/vectors.html \
+                   _site/apps/snooper/index.html _site/apps/console/index.html \
+                   _site/apps/simulator/index.html \
+                   _site/src/tincan/worklet.js _site/src/tincan/modem.js; do
+            test -s "$f" || (echo "missing or empty: $f" && exit 1)
+          done
+          echo "site contains $(find _site -type f | wc -l) files"
