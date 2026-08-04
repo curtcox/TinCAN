@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinCAN Simulator</title>
+<meta name="description" content="Run a whole TinCAN bus in the browser: real tones, real detection, simulated air. Watch bitwise arbitration resolve.">
+<link rel="stylesheet" href="../../style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🔊</text></svg>">
+</head>
+<body>
+<div id="chrome"></div>
+
+<main class="wrap wide">
+  <h1 style="margin:0 0 .2rem;font-size:1.6rem;letter-spacing:-.02em">Simulator</h1>
+  <p style="margin:0 0 1.5rem;color:var(--dim);max-width:52rem">
+    A whole TinCAN bus, offline. This runs the <em>same</em> physical layer and state machine
+    the live apps use — real tone generation, real Goertzel detection, real bit clocks — over a
+    simulated room with per-path propagation delay, distance attenuation, noise and a
+    reverberant tail. No microphone, no second device, and it is deterministic, so you can
+    watch a specific arbitration happen the same way twice.
+  </p>
+
+  <div class="panel">
+    <div class="row">
+      <label class="row tight" style="font-size:.85rem;color:var(--dim)">
+        Scenario <select id="scenario" style="width:auto;min-width:16rem"></select>
+      </label>
+      <button id="run" class="primary">Run</button>
+      <button id="cancel" disabled>Stop</button>
+      <span class="spacer"></span>
+      <span id="progress" class="pill">idle</span>
+    </div>
+    <p class="note" id="desc"></p>
+  </div>
+
+  <div class="grid side">
+    <div>
+      <div class="panel">
+        <h2>Channel</h2>
+        <label class="field"><span>Bit timing</span><select id="profile"></select></label>
+        <label class="field"><span>Band</span><select id="band"></select></label>
+        <label class="field"><span>Noise <b id="noiseval"></b></span>
+          <input id="noise" type="range" min="0" max="120" value="5"></label>
+        <label class="field"><span>Reverberation RT60 <b id="rtval"></b></span>
+          <input id="rt60" type="range" min="0" max="150" value="0"></label>
+        <label class="field"><span>Duration <b id="durval"></b></span>
+          <input id="duration" type="range" min="4" max="60" value="20"></label>
+        <label class="field"><span>Random seed</span>
+          <input id="seed" type="number" value="1" min="0"></label>
+      </div>
+
+      <div class="panel">
+        <h2>Nodes</h2>
+        <div id="nodes"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Outcome</h2>
+        <div id="outcome" class="log" style="max-height:22rem"></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>Room</h2>
+        <canvas id="room" height="220"></canvas>
+        <p class="note" id="roomnote"></p>
+      </div>
+
+      <div class="panel">
+        <h2>Bit timeline</h2>
+        <canvas id="timeline" height="240"></canvas>
+        <p class="note">
+          Each row is one node's <b>transmitted</b> level over time;
+          the bottom row is the level a passive probe in the middle of the room actually
+          <b>observes</b>.
+          <span class="dom">■</span> dominant &nbsp;
+          <span class="rec">■</span> recessive &nbsp;
+          <span class="muted">■</span> silent.
+          Where two rows are both coloured, two nodes are transmitting at once — and the
+          probe row shows the wired-AND result.
+        </p>
+        <div class="row">
+          <label class="row tight" style="font-size:.8rem;color:var(--dim)">
+            Zoom <input id="zoom" type="range" min="1" max="20" value="1" style="width:10rem"></label>
+          <label class="row tight" style="font-size:.8rem;color:var(--dim)">
+            Pan <input id="pan" type="range" min="0" max="1000" value="0" style="width:14rem"></label>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="row" style="margin-bottom:.75rem">
+          <h2 style="margin:0">Events</h2>
+          <span class="spacer"></span>
+          <label class="row tight" style="font-size:.8rem;color:var(--dim)">
+            <input type="checkbox" id="verbose" style="width:auto"> show every event</label>
+        </div>
+        <div class="log" id="events" style="max-height:26rem"></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="site">
+  TinCAN — <a href="../../">specification and apps</a> ·
+  <a href="https://github.com/curtcox/TinCAN">source</a>
+</footer>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

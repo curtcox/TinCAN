@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinCAN — a CAN-inspired bus over sound</title>
+<meta name="description" content="TinCAN is an acoustic multi-master bus with true bitwise arbitration: two devices talking at once resolve by priority, bit by bit, with no collision and no backoff.">
+<link rel="stylesheet" href="./style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🥫</text></svg>">
+</head>
+<body>
+
+<header class="topbar">
+  <a class="brand" href="./">Tin<span>CAN</span></a>
+  <nav>
+    <a href="./spec/tincan-1.0.html">Part 1</a>
+    <a href="./spec/transport.html">Part 2</a>
+    <a href="./spec/rationale.html">Rationale</a>
+    <a href="./spec/vectors.html">Test vectors</a>
+    <a href="./apps/snooper/">Snooper</a>
+    <a href="./apps/console/">Console</a>
+    <a href="./apps/simulator/">Simulator</a>
+    <a href="https://github.com/curtcox/TinCAN">GitHub</a>
+  </nav>
+</header>
+
+<main class="wrap">
+  <section class="hero">
+    <h1>TinCAN</h1>
+    <p class="tag">A CAN-inspired multi-master bus that runs over sound.</p>
+    <p class="lede">
+      Two devices in the same room, with nothing but a speaker and a microphone
+      each, form a bus. When they transmit at the same instant, the higher-priority
+      message survives <em>intact</em> — resolved bit by bit by the air itself,
+      with no collision, no backoff, and nothing retransmitted. That mechanism is
+      CAN's one genuinely original idea, and TinCAN is an attempt to find out
+      whether it survives a channel whose propagation delay is measured in
+      milliseconds.
+    </p>
+    <p class="lede">
+      It does, at 10–100 bit/s, within a couple of metres. That is a bad bit rate
+      and a fine control bus.
+    </p>
+  </section>
+
+  <div class="cards">
+    <a class="card" href="./apps/simulator/">
+      <span class="kicker">Start here</span>
+      <h3>Simulator</h3>
+      <p>Run a whole bus in the browser — real tones, real detection, simulated air.
+         Watch two nodes collide and resolve. No microphone needed.</p>
+    </a>
+    <a class="card" href="./apps/snooper/">
+      <span class="kicker">Analyzer</span>
+      <h3>Snooper</h3>
+      <p>Point a microphone at a bus and decode it. Frames, bit stream,
+         signal levels, error counters, JSONL export. Transmits nothing.</p>
+    </a>
+    <a class="card" href="./apps/console/">
+      <span class="kicker">Node</span>
+      <h3>Console</h3>
+      <p>A full node. Send frames and text, see peers, watch arbitration and
+         error confinement. Open it on two devices in one room.</p>
+    </a>
+  </div>
+
+  <section class="prose">
+    <h2>How it works, in one page</h2>
+
+    <p>
+      A CAN bus is a wired-AND: a node driving <em>dominant</em> overrides every node
+      driving <em>recessive</em>. Every transmitter reads the bus back while it drives it,
+      so a node that sends recessive and reads dominant knows immediately that somebody
+      with a lower identifier is talking, and withdraws. It has sent nothing that
+      disturbed the winner, so the winner's frame is undamaged and the loser simply
+      tries again later. Priority is resolved in the medium, per bit, for free.
+    </p>
+
+    <p>TinCAN builds that same wired-AND out of two sine waves:</p>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Bus level</th><th>Tone transmitted</th><th>Decided by</th></tr></thead>
+      <tbody>
+        <tr><td><b class="dom">dominant</b> (logical 0)</td><td><code>f_D</code> — 4250 Hz in the default band</td>
+            <td rowspan="2">the fraction of in-band energy sitting at <code>f_D</code>, measured over a window ending at the sample point</td></tr>
+        <tr><td><b class="rec">recessive</b> (logical 1)</td><td><code>f_R</code> — 3000 Hz</td></tr>
+        <tr><td><span class="muted">idle</span></td><td>silence</td><td>no carrier in either bin</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>
+      Recessive is a <em>tone</em>, not silence. That single choice does most of the work:
+      it turns the dominant decision into a ratio between two simultaneous measurements
+      from the same microphone, so it needs no calibration and no automatic gain control;
+      it gives a decaying echo something to compete against; it keeps voice codecs and
+      noise gates from squelching the channel; and it makes "idle" physically distinct
+      from "recessive", so carrier sense is a measurement rather than a bit count.
+      <a href="./spec/rationale.html#2-why-tones-rather-than-silence">The rationale explains why</a>.
+    </p>
+
+    <p>
+      Everything above the tones is CAN with two audio-driven changes. Frames get an
+      eight-bit alternating <code>SYNC</code> preamble, which is fixed-form and therefore
+      identical for every contender — that is what lets a node measure how late it
+      started and correct its own transmit clock before any information-bearing bit is at
+      stake. And the acknowledgement slot is two bits rather than one, because an
+      acknowledging node's clock is offset from the transmitter's by a full propagation
+      delay.
+    </p>
+
+    <div class="frame-diagram table-scroll">
+<pre>
+ SYNC     SOF  ID(11)        RTR IDE FDF r0  DLC(4)  DATA(0-64 B)   CRC(17)  ⌐  ACK ⌐  EOF(7)  IFS(3)
+ 01010101  0   iiiiiiiiiii    r   0   0   0   dddd   ........       ccccccc     11     1111111  111
+ └ fixed ┘ └───────── arbitration ──────────┘ └──────── bit-stuffed, CRC-protected ────┘ └ fixed ┘
+</pre>
+    </div>
+
+    <h2>What it costs</h2>
+
+    <div class="table-scroll">
+    <table>
+      <thead><tr><th>Profile</th><th>Bit rate</th><th>8-octet frame</th><th>Arbitration range</th><th>For</th></tr></thead>
+      <tbody>
+        <tr><td><code>T100</code></td><td>100 bit/s</td><td>1.2 s</td><td>~0.3 m</td><td>bench, cable, loopback</td></tr>
+        <tr><td><code>T50</code></td><td>50 bit/s</td><td>2.5 s</td><td>~0.9 m</td><td>two devices on a desk</td></tr>
+        <tr><td><code>T25</code> <span class="pill">default</span></td><td>25 bit/s</td><td>4.9 s</td><td>~2.9 m</td><td>a room</td></tr>
+        <tr><td><code>T10</code></td><td>10 bit/s</td><td>12.3 s</td><td>~7.7 m</td><td>a hall, or a reverberant one</td></tr>
+      </tbody>
+    </table>
+    </div>
+
+    <p>
+      Those are honest numbers, and they are the whole trade. If you want to move bytes
+      over sound, use a packet modem — <a href="https://github.com/curtcox/Wavest">Wavest</a>
+      and the ggwave codec underneath it are far better at that and always will be. What
+      they cannot give you is a shared medium where the collision of two transmissions has
+      a defined, useful outcome. On a ggwave link, two simultaneous transmissions are two
+      lost packets. On a TinCAN bus, they are one delivered frame and one deferred frame.
+    </p>
+
+    <h2>Read it</h2>
+
+    <div class="cards">
+      <a class="card" href="./spec/tincan-1.0.html">
+        <span class="kicker">Normative</span>
+        <h3>Part 1 — Physical and Data Link</h3>
+        <p>Tone signalling, band plans, the ratio detector, bit timing and
+           synchronization, frame formats, arbitration, error confinement.</p>
+      </a>
+      <a class="card" href="./spec/transport.html">
+        <span class="kicker">Normative</span>
+        <h3>Part 2 — Addressing and Transport</h3>
+        <p>Identifier structure, address claiming, ISO-TP-style segmentation,
+           presence, and the application profiles the apps speak.</p>
+      </a>
+      <a class="card" href="./spec/rationale.html">
+        <span class="kicker">Non-normative</span>
+        <h3>Rationale</h3>
+        <p>Why it is shaped this way, what was rejected and why, and an honest
+           list of where the design is on thin ice.</p>
+      </a>
+      <a class="card" href="./spec/vectors.html">
+        <span class="kicker">Reference</span>
+        <h3>Test vectors</h3>
+        <p>CRC-17 vectors and complete on-air bit sequences, generated from the
+           reference implementation at build time.</p>
+      </a>
+    </div>
+
+    <h2>Use it</h2>
+
+    <p>
+      The reference implementation is dependency-free ES modules. Nothing but
+      <code>modem.js</code> touches the DOM or Web Audio, so the protocol runs unchanged
+      in Node, in a worker, and inside an <code>AudioWorkletGlobalScope</code> — which is
+      where the live apps run it, because a transmit decision is due every bit boundary
+      and the main thread cannot be trusted with that deadline.
+    </p>
+
+<pre><code>import { Modem } from './src/tincan/modem.js';
+
+const modem = new Modem({ band: 'A', profile: 'T25' });
+modem.on('frame', (e) =&gt; console.log('received', e.detail.frame));
+await modem.start();                       // asks for the microphone
+modem.send({ id: 0x123, data: [0xde, 0xad] });</code></pre>
+
+    <p>And offline, with no audio hardware at all:</p>
+
+<pre><code>import { AcousticChannel } from './src/tincan/bus.js';
+
+const ch = new AcousticChannel({
+  nodes: [{ name: 'a', x: 0, y: 0 }, { name: 'b', x: 1, y: 0 }],
+});
+const [a, b] = ch.protocols;
+b.on('frame', ({ frame }) =&gt; console.log(frame));
+a.send({ id: 0x123, data: [1, 2, 3] });
+ch.run(6);                                  // six seconds of simulated air</code></pre>
+
+    <h2>Caveats worth reading before you build on it</h2>
+
+    <ul>
+      <li><b>It is not CAN.</b> No interoperability with any CAN, CAN FD or CAN XL
+        implementation is attempted or possible. Field widths, polynomials and timing
+        all differ.</li>
+      <li><b>There is no security.</b> Every frame is audible to the whole room, any node
+        may claim any identifier, and a continuous tone denies the bus to everyone.
+        See <a href="./spec/tincan-1.0.html#10-security-considerations">§10</a>.</li>
+      <li><b>Echo cancellation breaks it.</b> A node must hear its own transmission to
+        arbitrate at all, and AEC exists to remove exactly that. The apps ask the browser
+        to disable it and warn you loudly when the browser declines.</li>
+      <li><b>Distance ratios matter more than distance.</b> The binding constraint is not
+        how far apart nodes are but how <em>unequal</em> the distances are —
+        see <a href="./spec/tincan-1.0.html#46-near-far-limit">§4.6</a>.</li>
+      <li><b>Band A is audible</b>, and after a while, irritating. That is the default on
+        purpose, because it works on every device and because a bus you can hear is a bus
+        you can debug.</li>
+    </ul>
+  </section>
+</main>
+
+<footer class="site">
+  TinCAN 1.0.0-draft · specification and reference implementation ·
+  <a href="https://github.com/curtcox/TinCAN">github.com/curtcox/TinCAN</a>
+</footer>
+
+</body>
+</html>
