@@ -6,7 +6,8 @@ import {
   segment, Reassembler, PCI, PRIO, TOPIC, BROADCAST_EXT,
   buildAnnounce, parseAnnounce, Session, MAX_TRANSFER,
 } from '../src/tincan/transport.js';
-import { Protocol, arbitrationKey } from '../src/tincan/protocol.js';
+import { Protocol, arbitrationKey, DOMINANT, RECESSIVE } from '../src/tincan/protocol.js';
+import { EOF_BITS } from '../src/tincan/frame.js';
 import { IdealBus } from '../src/tincan/bus.js';
 
 test('base identifiers pack and unpack', () => {
@@ -178,6 +179,42 @@ test('two sessions talking at once interleave without corrupting either message'
   assert.equal(atA[0].text, 'message from twenty, also long enough to need several frames');
   assert.equal(pa.stats.crcErrors + pb.stats.crcErrors, 0);
 });
+
+test('a segment received twice does not cost the whole message',
+  { todo: 'a repeated CONSECUTIVE frame reads as a sequence gap, the reassembler resets, and every later segment is an orphan' },
+  () => {
+    // CAN's double reception: the sender misreads its next-to-last
+    // EOF bit, flags an error that receivers see only in their last EOF bit,
+    // which they ignore. They keep the frame; the sender sends it again.
+    const pa = new Protocol({ name: 'a' });
+    const pb = new Protocol({ name: 'b' });
+    const a = new Session(pa, { address: 3 });
+    const b = new Session(pb, { address: 12 });
+    const got = [];
+    const errors = [];
+    b.on('message', (m) => got.push(m.text));
+    b.on('transport-error', (e) => errors.push(e.error));
+
+    const text = 'a message long enough to take several frames';
+    a.sendText(text);
+    let glitched = false;
+    for (let i = 0; i < 20000; i++) {
+      const tx = [pa.beginBit(), pb.beginBit()];
+      const carrier = tx.some((l) => l !== null);
+      const level = tx.includes(DOMINANT) ? DOMINANT : RECESSIVE;
+      // The glitch lands on the second frame, the first CONSECUTIVE segment.
+      const glitch = !glitched && pa.stats.framesSent === 1
+        && pa.state === 'eof' && pa.eofIndex === EOF_BITS - 2;
+      if (glitch) glitched = true;
+      pa.endBit(glitch ? DOMINANT : level, carrier);
+      pb.endBit(level, carrier);
+    }
+
+    assert.ok(glitched);
+    assert.equal(pb.stats.framesReceived, pa.stats.framesSent + 1, 'b did receive one frame twice');
+    assert.deepEqual(errors, []);
+    assert.deepEqual(got, [text]);
+  });
 
 test('binary payloads that are not valid UTF-8 are surfaced as bytes', () => {
   const pa = new Protocol({ name: 'a' });
