@@ -230,6 +230,19 @@ test('two Consoles talk when each hears itself 20× louder than the other and cl
   assertConversed(ada, bob);
 });
 
+test('two Consoles talk with the room noise only 10 dB below the peer\'s tone', () => {
+  // Wideband: uniform noise of amplitude 0.1 against a 0.25 tone. Each
+  // detector listens in a band about 100 Hz wide, so it sees far better.
+  const ada = consoleNode({ name: 'ada', address: 3 });
+  const bob = consoleNode({ name: 'bob', address: 12 });
+  const run = room([ada, bob], { noise: 0.1 });
+
+  run(0.5);
+  converse(run, ada, bob);
+
+  assertConversed(ada, bob);
+});
+
 test('a Console whose microphone delivers nothing for its first 0.2 s still transmits', () => {
   // Capture devices take a moment to start, and until they do the worklet's
   // input has no channels at all.
