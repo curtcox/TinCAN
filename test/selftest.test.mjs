@@ -68,7 +68,9 @@ test('the self check measures latency and level, and judges latency against each
   assert.equal(verdict(a, 'T25', 'latency').ok, false);
   assert.equal(verdict(a, 'T10', 'latency').ok, true);
   assert.equal(verdict(a, 'T50', 'latency').ok, false);
-  assert.equal(verdict(a, 'T25', 'own echo in the ACK slot').ok, true, 'no room, no echo');
+  for (const profile of ['T100', 'T50', 'T25', 'T10']) {
+    assert.equal(verdict(a, profile, 'own echo in the ACK slot').ok, true, `${profile}: no room, no echo`);
+  }
   assert.equal(general(a, 'own tone vs the other device').ok, null, 'not judged without the other device');
 });
 

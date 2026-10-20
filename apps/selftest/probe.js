@@ -13,7 +13,9 @@
  *   0.50 s       50 ms chirp  2–6 kHz: a sharp correlation peak, for latency
  *   0.80–1.20 s  f_D tone     dominant, at the Console's level
  *   1.20–1.60 s  f_R tone     recessive, straight after it
- *   1.60–2.50 s  silence      both tones' reverberant decay
+ *   1.60–1.80 s  f_D tone     dominant again, then
+ *   1.80–2.80 s  silence      its reverberant decay, as a transmitter hears it
+ *                             in the ACK slot after its last dominant bit
  */
 
 import { BANDS, PROFILES, DETECTOR_DEFAULTS, timing, nearFarMarginDb } from '../../src/tincan/params.js';
@@ -30,7 +32,9 @@ export const SCHEDULE = {
   chirpHz: [2000, 6000],
   toneAt: 0.8,
   toneLen: 0.4,
-  repeatEvery: 2.5,
+  echoAt: 1.6,
+  echoLen: 0.2,
+  repeatEvery: 2.8,
   repeats: 2,
 };
 
@@ -62,10 +66,15 @@ export function buildProbeSignal(fs) {
     const base = r * SCHEDULE.repeatEvery;
     const c0 = Math.round((base + SCHEDULE.chirpAt) * fs);
     for (let i = 0; i < c.length; i++) out[c0 + i] = AMPLITUDE * c[i];
-    for (const [k, f] of [[0, TONE_HZ], [1, RECESSIVE_HZ]]) {
-      const t0 = Math.round((base + SCHEDULE.toneAt + k * SCHEDULE.toneLen) * fs);
-      for (let i = 0; i < toneN; i++) {
-        const edge = Math.min(i, toneN - 1 - i);
+    const bursts = [
+      [SCHEDULE.toneAt, toneN, TONE_HZ],
+      [SCHEDULE.toneAt + SCHEDULE.toneLen, toneN, RECESSIVE_HZ],
+      [SCHEDULE.echoAt, Math.round(SCHEDULE.echoLen * fs), TONE_HZ],
+    ];
+    for (const [at, n, f] of bursts) {
+      const t0 = Math.round((base + at) * fs);
+      for (let i = 0; i < n; i++) {
+        const edge = Math.min(i, n - 1 - i);
         const g = edge < ramp ? 0.5 - 0.5 * Math.cos((Math.PI * (edge + 1)) / ramp) : 1;
         out[t0 + i] += AMPLITUDE * g * Math.sin((2 * Math.PI * f * i) / fs);
       }
@@ -174,12 +183,15 @@ function steadyLevel(x, fs, end, w, f) {
 }
 
 /**
- * Level, noise and decay of a dominant burst that reached `x` at `start` and
- * gave way to a recessive one at `end` (seconds). `quiet` is a stretch of `x`
- * with no signal. `lag` is how late this device hears its own transitions,
- * for the reading a transmitter takes of its own bits; 0 for another device.
+ * Measure one repeat of the signal, whose chirp reached `x` at `chirpAt`
+ * (seconds). `lag` is how late this device hears its own transitions, for
+ * the reading a transmitter takes of its own bits; 0 for another device.
  */
-function measureBurst(x, fs, start, end, quiet, lag = 0) {
+function measureRepeat(x, fs, chirpAt, lag = 0) {
+  const t0 = chirpAt - SCHEDULE.chirpAt;
+  const end = t0 + SCHEDULE.toneAt + SCHEDULE.toneLen;     // dominant gives way to recessive
+  const silent = t0 + SCHEDULE.echoAt + SCHEDULE.echoLen;  // the last dominant stops dead
+  const quiet = [t0 + SCHEDULE.quiet[0], t0 + SCHEDULE.quiet[1]];
   const profiles = {};
   for (const p of profileTiming(fs)) {
     const at = (dt, f) => toneAmplitude(x, Math.round((end + dt) * fs), p.w, f, fs);
@@ -197,19 +209,20 @@ function measureBurst(x, fs, start, end, quiet, lag = 0) {
       // What is left of the dominant bit at the next bit's sample point.
       tailNextBit: at(p.samplePoint, TONE_HZ),
       dominantFraction: ratioAt(p.samplePoint - lag),
-      // ...and at the sample point of the second ACK bit, which a transmitter
-      // reads two bit times after its last possible dominant bit (§6.7).
-      tailAck: at(2 * p.bitTime + p.samplePoint, TONE_HZ),
+      // What is left of a dominant bit, with nothing after it, at the sample
+      // point of the second ACK bit: a transmitter reads that two bit times
+      // after its last possible dominant bit (§6.7).
+      tailAck: toneAmplitude(x, Math.round((silent + 2 * p.bitTime + p.samplePoint) * fs), p.w, TONE_HZ, fs),
     };
   }
 
   // RT60 from the slope of the decay, 12 ms windows every 5 ms, from 20 ms
-  // after the tone stops until the decay is within 10 dB of the noise.
+  // after the last tone stops until the decay is within 10 dB of the noise.
   const w = Math.round(0.012 * fs);
   const floor = noiseAmplitude(x, quiet[0], quiet[1], w, fs);
   const pts = [];
   for (let dt = 0.02; dt < 0.8; dt += 0.005) {
-    const a = toneAmplitude(x, Math.round((end + dt) * fs), w, TONE_HZ, fs);
+    const a = toneAmplitude(x, Math.round((silent + dt) * fs), w, TONE_HZ, fs);
     if (a <= floor * 3.16) break;
     pts.push([dt, 20 * Math.log10(a)]);
   }
@@ -241,9 +254,7 @@ export function analyseSelf(rec, fs) {
     const base = r * SCHEDULE.repeatEvery;
     const found = findChirp(rec, fs, base + SCHEDULE.chirpAt);
     if (!found) continue;
-    const start = base + SCHEDULE.toneAt + found.delay;
-    const burst = measureBurst(rec, fs, start, start + SCHEDULE.toneLen,
-      [base + SCHEDULE.quiet[0], base + SCHEDULE.quiet[1]], found.delay);
+    const burst = measureRepeat(rec, fs, base + SCHEDULE.chirpAt + found.delay, found.delay);
     reps.push({ latency: found.delay, correlation: found.correlation, ...burst });
   }
   if (!reps.length) return { heard: false, repeats: 0 };
@@ -268,7 +279,7 @@ export function analysePeer(rec, fs) {
   const minRun = Math.round((0.6 * SCHEDULE.toneLen * fs) / hop);
   // A tone fades in and out as it reverberates, so one burst can cross the
   // threshold more than once: once one is found, skip past all of it.
-  const burstHops = Math.round((2 * SCHEDULE.toneLen + 0.8) * fs / hop);
+  const burstHops = Math.round((SCHEDULE.repeatEvery - SCHEDULE.toneAt - 0.2) * fs / hop);
   for (let i = 0; i < env.length; i++) {
     if (env[i] < threshold) continue;
     let j = i;
@@ -283,14 +294,9 @@ export function analysePeer(rec, fs) {
     const found = findChirp(rec, fs, chirpGuess, 0.5);
     if (found) {
       const chirpAt = chirpGuess + found.delay;
-      const start = chirpAt + (SCHEDULE.toneAt - SCHEDULE.chirpAt);
-      const quietFrom = chirpAt - (SCHEDULE.chirpAt - SCHEDULE.quiet[0]);
-      if (quietFrom >= 0 && start + 2 * SCHEDULE.toneLen + 0.5 <= rec.length / fs) {
-        reps.push({
-          at: chirpAt,
-          ...measureBurst(rec, fs, start, start + SCHEDULE.toneLen,
-            [quietFrom, chirpAt - (SCHEDULE.chirpAt - SCHEDULE.quiet[1])]),
-        });
+      const t0 = chirpAt - SCHEDULE.chirpAt;
+      if (t0 + SCHEDULE.quiet[0] >= 0 && t0 + SCHEDULE.echoAt + SCHEDULE.echoLen + 0.8 <= rec.length / fs) {
+        reps.push({ at: chirpAt, ...measureRepeat(rec, fs, chirpAt) });
       }
     }
     i += burstHops;
@@ -355,7 +361,7 @@ export function assess(self, peer = null) {
     general.push({
       name: 'other device above the noise',
       ok: peer.profiles.T25.steady >= 4 * peer.profiles.T25.noise,
-      detail: `${db(peer.profiles.T25.steady / peer.profiles.T25.noise).toFixed(0)} dB above the noise in the detector's band`,
+      detail: `${Math.min(99, db(peer.profiles.T25.steady / peer.profiles.T25.noise)).toFixed(0)} dB above the noise in the detector's band`,
     });
   }
 
