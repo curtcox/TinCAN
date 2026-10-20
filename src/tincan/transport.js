@@ -3,6 +3,10 @@
  * Spec: spec/transport.md
  */
 
+import {
+  BANDS, PROFILES, timing, maxRange, bandsCompatible, bandById, profileById,
+} from './params.js';
+
 /* ------------------------------------------------------------------ */
 /* identifiers                                                         */
 /* ------------------------------------------------------------------ */
@@ -207,12 +211,12 @@ export function describePci(payload) {
 /* ------------------------------------------------------------------ */
 
 export const CAP = {
-  FULL_NODE: 0x80, SEGMENTED: 0x40, TEXT: 0x20, LISTENER_ONLY: 0x10,
+  FULL_NODE: 0x80, SEGMENTED: 0x40, TEXT: 0x20, LISTENER_ONLY: 0x10, SIDE_LINKS: 0x08,
 };
 
 export const PROTOCOL_VERSION = 0x10;
 
-export function buildAnnounce(callsign, caps = CAP.SEGMENTED | CAP.TEXT) {
+export function buildAnnounce(callsign, caps = CAP.SEGMENTED | CAP.TEXT | CAP.SIDE_LINKS) {
   const name = new TextEncoder().encode(callsign || '');
   const out = new Uint8Array(2 + Math.min(6, name.length));
   out[0] = PROTOCOL_VERSION;
@@ -231,7 +235,118 @@ export function parseAnnounce(data) {
     segmented: !!(data[1] & CAP.SEGMENTED),
     text: !!(data[1] & CAP.TEXT),
     leaving: !!(data[1] & CAP.LISTENER_ONLY),
+    sideLinks: !!(data[1] & CAP.SIDE_LINKS),
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* side links — Part 2 §8                                              */
+/* ------------------------------------------------------------------ */
+
+/** First octet of a CONTROL frame. */
+export const CONTROL = {
+  ACK: 0x06, NAK: 0x15, LINK_PROPOSE: 0x20, LINK_ACCEPT: 0x21, LINK_DECLINE: 0x22, LINK_CLOSE: 0x23,
+};
+export const DECLINE = { BAND: 1, TIMING: 2, BUSY: 3, REFUSED: 4 };
+export const CLOSE = { FINISHED: 0, NO_CONTACT: 1, ERRORS: 2 };
+export const DECLINE_TEXT = {
+  [DECLINE.BAND]: 'band not usable there',
+  [DECLINE.TIMING]: 'the profile cannot cover both audio paths',
+  [DECLINE.BUSY]: 'band busy, or cannot share the devices with the main bus',
+  [DECLINE.REFUSED]: 'refused',
+};
+export const CLOSE_TEXT = {
+  [CLOSE.FINISHED]: 'finished', [CLOSE.NO_CONTACT]: 'no contact on the link', [CLOSE.ERRORS]: 'errors',
+};
+
+const slopByte = (ms) => (ms == null || !Number.isFinite(ms) ? 255 : Math.max(0, Math.min(254, Math.round(ms))));
+const slopMs = (b) => (b === 255 ? null : b);
+
+/**
+ * The payload of a side-link CONTROL frame — Part 2 §8.1.
+ * @param {{op:number, to?:number, proposer?:number, peer?:number, link:number,
+ *   band?:string, profile?:string, slopMs?:number|null, reason?:number}} m
+ */
+export function buildLinkMessage(m) {
+  switch (m.op) {
+    case CONTROL.LINK_PROPOSE:
+      return Uint8Array.of(m.op, m.to & 31, m.link & 0xff, BANDS[m.band].id, PROFILES[m.profile].id, slopByte(m.slopMs));
+    case CONTROL.LINK_ACCEPT:
+      return Uint8Array.of(m.op, m.proposer & 31, m.link & 0xff, slopByte(m.slopMs));
+    case CONTROL.LINK_DECLINE:
+      return Uint8Array.of(m.op, m.proposer & 31, m.link & 0xff, m.reason & 0xff);
+    case CONTROL.LINK_CLOSE:
+      return Uint8Array.of(m.op, m.peer & 31, m.link & 0xff, m.reason & 0xff);
+    default:
+      throw new Error(`not a side-link opcode: ${m.op}`);
+  }
+}
+
+/** Parse a CONTROL frame's payload, or null if it is not one this knows. */
+export function parseControl(data) {
+  if (!data || !data.length) return null;
+  const op = data[0];
+  const need = { [CONTROL.LINK_PROPOSE]: 6, [CONTROL.LINK_ACCEPT]: 4, [CONTROL.LINK_DECLINE]: 4, [CONTROL.LINK_CLOSE]: 4 };
+  if (op === CONTROL.ACK || op === CONTROL.NAK) return { op, name: op === CONTROL.ACK ? 'ACK' : 'NAK' };
+  if (!need[op] || data.length < need[op]) return null;
+  switch (op) {
+    case CONTROL.LINK_PROPOSE: {
+      const band = bandById(data[3]);
+      const profile = profileById(data[4]);
+      return { op, name: 'LINK_PROPOSE', to: data[1], link: data[2], band, profile, slopMs: slopMs(data[5]) };
+    }
+    case CONTROL.LINK_ACCEPT:
+      return { op, name: 'LINK_ACCEPT', proposer: data[1], link: data[2], slopMs: slopMs(data[3]) };
+    case CONTROL.LINK_DECLINE:
+      return { op, name: 'LINK_DECLINE', proposer: data[1], link: data[2], reason: data[3] };
+    default:
+      return { op, name: 'LINK_CLOSE', peer: data[1], link: data[2], reason: data[3] };
+  }
+}
+
+/** A CONTROL frame's payload in words, for analyzers. */
+export function describeControl(data) {
+  const c = parseControl(data);
+  if (!c) return null;
+  const slop = (ms) => (ms == null ? 't_slop unknown' : `t_slop ${ms} ms`);
+  switch (c.op) {
+    case CONTROL.LINK_PROPOSE:
+      return `LINK_PROPOSE #${c.link} to ${c.to === BROADCAST_BASE ? 'anyone' : c.to}: `
+        + `band ${c.band ?? '?'}, ${c.profile ?? '?'}, ${slop(c.slopMs)}`;
+    case CONTROL.LINK_ACCEPT: return `LINK_ACCEPT ${c.proposer}#${c.link}, ${slop(c.slopMs)}`;
+    case CONTROL.LINK_DECLINE: return `LINK_DECLINE ${c.proposer}#${c.link}: ${DECLINE_TEXT[c.reason] ?? c.reason}`;
+    case CONTROL.LINK_CLOSE: return `LINK_CLOSE #${c.link} with ${c.peer}: ${CLOSE_TEXT[c.reason] ?? c.reason}`;
+    default: return c.name;
+  }
+}
+
+/** T_link — Part 2 §8.3: how long a new link has to come up, in seconds. */
+export function linkTimeout(profile) {
+  const fiveOctetFrame = 59 + 8 * 5;
+  return Math.max(10, 4 * fiveOctetFrame * timing(profile).bitTime);
+}
+
+/**
+ * Whether this node should accept a proposed side link — Part 2 §8.2.
+ * Returns null to accept, or the DECLINE reason.
+ *
+ * @param {{band:string|null, profile:string|null, slopMs:number|null}} proposal
+ * @param {object} here
+ * @param {string} here.mainBand
+ * @param {string} here.mainProfile
+ * @param {number|null} [here.slopMs] this node's measured t_slop
+ * @param {string[]} [here.bandsInUse] by other links it has heard accepted
+ * @param {(band:string) => boolean} [here.canUseBand]
+ */
+export function assessProposal(proposal, { mainBand, mainProfile, slopMs: mine = null, bandsInUse = [], canUseBand = () => true }) {
+  const { band, profile } = proposal;
+  if (!band || !profile || !canUseBand(band)) return DECLINE.BAND;
+  if (band === mainBand || bandsInUse.includes(band) || !bandsCompatible(mainBand, mainProfile, band, profile)) {
+    return DECLINE.BUSY;
+  }
+  const slops = [proposal.slopMs, mine].filter((v) => v != null);
+  if (slops.length && maxRange(profile, Math.max(...slops) + timing(profile).tq * 250) <= 0) return DECLINE.TIMING;
+  return null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -256,6 +371,9 @@ export class Session {
     this.peers = new Map();
     this.reassemblers = new Map();
     this.handlers = new Map();
+    /** Side links heard or taken part in, by `${proposer}:${link}` — Part 2 §8. */
+    this.links = new Map();
+    this.nextLink = 1 + Math.floor(Math.random() * 254);
 
     protocol.on('frame', ({ frame }) => this._onFrame(frame));
   }
@@ -269,6 +387,96 @@ export class Session {
   _emit(event, detail) {
     const s = this.handlers.get(event);
     if (s) for (const fn of s) fn(detail);
+  }
+
+  /* side links — Part 2 §8 --------------------------------------- */
+
+  _control(m) {
+    return this.protocol.send({
+      id: baseId({ prio: PRIO.CONTROL, topic: TOPIC.CONTROL, source: this.address }),
+      data: buildLinkMessage(m),
+    });
+  }
+
+  /**
+   * Propose a side link to node `to` (or BROADCAST_BASE for anyone). Resolves
+   * nothing: 'link-accepted' or 'link-declined' follows when the answer comes.
+   */
+  proposeLink({ to, band, profile, slopMs = null }) {
+    const link = this.nextLink;
+    this.nextLink = (this.nextLink % 255) + 1;
+    const rec = {
+      proposer: this.address, link, to, band, profile, slopMs, state: 'proposed', mine: true, peer: null, peerSlopMs: null,
+    };
+    this.links.set(`${this.address}:${link}`, rec);
+    this._control({ op: CONTROL.LINK_PROPOSE, to, link, band, profile, slopMs });
+    return rec;
+  }
+
+  acceptLink(rec, slopMs = null) {
+    rec.state = 'accepted';
+    rec.mine = true;
+    rec.peer = rec.proposer;
+    this._control({ op: CONTROL.LINK_ACCEPT, proposer: rec.proposer, link: rec.link, slopMs });
+    this._emit('link-open', { link: rec });
+  }
+
+  declineLink(rec, reason = DECLINE.REFUSED) {
+    rec.state = 'declined';
+    this._control({ op: CONTROL.LINK_DECLINE, proposer: rec.proposer, link: rec.link, reason });
+  }
+
+  closeLink(rec, reason = CLOSE.FINISHED) {
+    if (rec.state === 'closed') return;
+    rec.state = 'closed';
+    this._control({ op: CONTROL.LINK_CLOSE, peer: rec.peer ?? rec.to, link: rec.link, reason });
+    this._emit('link-closed', { link: rec, reason, by: this.address });
+  }
+
+  /** Bands of links accepted and not closed, so as not to propose them. */
+  bandsInUse() {
+    return [...this.links.values()].filter((l) => l.state === 'accepted').map((l) => l.band);
+  }
+
+  _onControl(c, source) {
+    if (c.op === CONTROL.LINK_PROPOSE) {
+      const rec = {
+        proposer: source, link: c.link, to: c.to, band: c.band, profile: c.profile,
+        slopMs: c.slopMs, state: 'proposed', mine: false, peer: null, peerSlopMs: null,
+      };
+      this.links.set(`${source}:${c.link}`, rec);
+      if (source !== this.address && (c.to === this.address || c.to === BROADCAST_BASE)) {
+        this._emit('link-proposal', { link: rec });
+      }
+      return;
+    }
+    if (c.op === CONTROL.LINK_ACCEPT || c.op === CONTROL.LINK_DECLINE) {
+      const rec = this.links.get(`${c.proposer}:${c.link}`);
+      if (!rec) return;
+      if (c.op === CONTROL.LINK_DECLINE) {
+        if (rec.proposer === this.address) {
+          rec.state = 'declined';
+          this._emit('link-declined', { link: rec, by: source, reason: c.reason });
+        }
+        return;
+      }
+      rec.state = 'accepted';
+      if (rec.proposer === this.address && rec.peer === null) {
+        rec.peer = source;
+        rec.peerSlopMs = c.slopMs;
+        this._emit('link-open', { link: rec });
+      } else if (!rec.mine) {
+        rec.peer = source;
+      }
+      return;
+    }
+    if (c.op === CONTROL.LINK_CLOSE) {
+      // The closer is one end; the other is named. Either may be the proposer.
+      const rec = this.links.get(`${source}:${c.link}`) || this.links.get(`${c.peer}:${c.link}`);
+      if (!rec || rec.state === 'closed') return;
+      rec.state = 'closed';
+      if (rec.mine) this._emit('link-closed', { link: rec, reason: c.reason, by: source });
+    }
   }
 
   announce(caps) {
@@ -301,6 +509,11 @@ export class Session {
   _onFrame(frame) {
     if (frame.extended) { this._emit('frame', { frame }); return; }
     const { topic, source } = parseBaseId(frame.id);
+
+    if (topic === TOPIC.CONTROL) {
+      const c = parseControl(frame.data);
+      if (c && c.op >= CONTROL.LINK_PROPOSE) { this._onControl(c, source); return; }
+    }
 
     if (topic === TOPIC.PRESENCE) {
       const a = parseAnnounce(frame.data);

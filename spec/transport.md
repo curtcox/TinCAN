@@ -268,7 +268,8 @@ Capability flags:
 | 6 | Supports segmented transport (§3) |
 | 5 | Supports text profile (§5.1) |
 | 4 | Listener only — will never transmit again after this frame |
-| 3–0 | reserved |
+| 3 | Supports side links (§8) |
+| 2–0 | reserved |
 
 A node SHOULD transmit `ANNOUNCE` on joining and MAY repeat it at an interval of
 not less than 60 s. Given the audibility of band A, implementations SHOULD
@@ -351,3 +352,93 @@ Three frames of 5, 8 and 5 octets — 99, 123 and 99 bits, plus stuffing — abo
 13 seconds of bus at `T25` to deliver ten characters. This is the correct order
 of magnitude for TinCAN and the reason Part 1 §1.3 lists throughput as a
 non-goal.
+
+---
+
+## 8. Side links
+
+A bus runs at the speed its slowest, furthest pair of nodes allows, and every
+node shares it. Two nodes that could do better between themselves — closer
+together, or with faster audio paths — may agree on a **side link**: a second
+TinCAN bus, on another band and usually a faster profile, that only they use.
+The main bus carries on exactly as before, and both nodes stay on it.
+
+### 8.1 Messages
+
+Side links are negotiated on the main bus, the one bus both nodes are known to
+share, with `CONTROL` frames (`TOPIC = 0`, `PRIO = 2`) from the sender's base
+address. The first payload octet of a `CONTROL` frame is an opcode:
+
+| Opcode | Name | Payload after the opcode |
+|---|---|---|
+| `0x06` | `ACK` | §3.4 |
+| `0x15` | `NAK` | §3.4 |
+| `0x20` | `LINK_PROPOSE` | to, link, band, profile, t_slop |
+| `0x21` | `LINK_ACCEPT` | proposer, link, t_slop |
+| `0x22` | `LINK_DECLINE` | proposer, link, reason |
+| `0x23` | `LINK_CLOSE` | peer, link, reason |
+
+| Field | Size | Meaning |
+|---|---|---|
+| to | 1 | The node invited, or `31` for any node that wants to join |
+| proposer, peer | 1 | The node the message answers or is addressed to |
+| link | 1 | Chosen by the proposer; with the proposer's address it names the link |
+| band | 1 | Part 1 §4.2 band ID, `0x01`–`0x04` |
+| profile | 1 | Part 1 §5.2 profile ID, `0x10`–`0x16` |
+| t_slop | 1 | The sender's measured t_slop (Part 1 §5.6) in ms, 0–254; `255` if unknown |
+
+`LINK_DECLINE` reasons: `1` band not usable here, `2` timing — the profile
+cannot cover both nodes' t_slop, `3` busy — the band is in use by the main
+bus or another link, or cannot share the devices with it (§8.2), `4` refused.
+
+`LINK_CLOSE` reasons: `0` finished, `1` no contact (§8.3), `2` errors.
+
+### 8.2 Choosing a band and profile
+
+A side link MUST use a band other than the main bus's, and other than any link
+the proposer has heard accepted and not closed. Where two bands' guard ranges
+overlap (bands A and C), each bit edge on one spills switching energy into the
+other's guard bins, and both buses MUST then use a profile with `TQ` of at
+least 5 ms (`T10` and slower). In the reference simulation A and C both at
+`T25` corrupt each other's frames; at `T10` and slower, and in every other
+pairing at any profile, neither notices the other.
+
+The profile MUST cover both nodes' t_slop (Part 1 §5.6). The proposer knows
+only its own; the invited node, knowing both, MUST decline with reason `2` if
+the profile cannot cover the larger of the two at any distance, and MAY decline
+if it judges the distance between them too great.
+
+Band B needs a sample rate of at least 44.1 kHz and a speaker and microphone
+that work above 17 kHz; a node that cannot run it MUST decline with reason `1`.
+
+### 8.3 Opening, checking and closing
+
+When a node sends or hears `LINK_ACCEPT` for a link it belongs to, it starts a
+second node on the link's band and profile, from the same address and with the
+same callsign, and keeps its main-bus node running unchanged. Both nodes'
+transmit levels add at the speaker; implementations SHOULD keep their sum
+below full scale.
+
+The proposer then transmits an `ANNOUNCE` (§4.1) on the link, and the other
+node answers with its own. A link is **up** for a node once it has received a
+frame from the other on it. A link that is not up within
+
+```
+T_link = max(10 s, 4 × the time of a 5-octet frame at the link's profile)
+```
+
+of the `LINK_ACCEPT` SHOULD be closed with `LINK_CLOSE` reason `1`: the main
+bus can hear both nodes, but the link evidently cannot.
+
+Either node may close the link at any time with `LINK_CLOSE` on the main bus,
+and then stops its link node. A node that leaves the main bus closes its links
+first. Nodes that hear `LINK_ACCEPT` and `LINK_CLOSE` between others SHOULD
+track which bands are in use, so as not to propose them.
+
+### 8.4 Why the main bus carries the control
+
+The link is negotiated where both nodes can already hear each other, and closed
+there too, so a link that fails — out of range on its band, or a band one
+device's speaker cannot reproduce — is noticed and ended on a bus that still
+works. Nothing about a side link changes the main bus: its frames, timing and
+arbitration are the same whether or not any links are open.

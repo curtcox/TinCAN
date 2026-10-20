@@ -104,6 +104,24 @@ export function maxRange(profile, slopMs) {
   return Math.max(0, ((propMs - 2 * slop) / 1000) * SPEED_OF_SOUND / 2);
 }
 
+export const bandById = (id) => Object.keys(BANDS).find((k) => BANDS[k].id === id) ?? null;
+export const profileById = (id) => Object.keys(PROFILES).find((k) => PROFILES[k].id === id) ?? null;
+
+/**
+ * Whether two buses, on bands `a` and `b` with profiles `pa` and `pb`, can run
+ * on the same devices at once without disturbing each other — Part 2 §8.2.
+ * Bands whose guard ranges overlap (A and C) sit 250 Hz from each other's
+ * tones, close enough that each bit edge's switching splatter reaches the
+ * other's guard bins through a short edge window. In simulation A and C both
+ * at T25 fail, and pairs at T10 or slower do not, nor does any other pair.
+ */
+export function bandsCompatible(a, pa, b, pb) {
+  if (a === b) return false;
+  const A = BANDS[a], B = BANDS[b];
+  const overlap = A.guardLo <= B.guardHi && B.guardLo <= A.guardHi;
+  return !overlap || (PROFILES[pa].tqMs >= 5 && PROFILES[pb].tqMs >= 5);
+}
+
 /**
  * The profile with the longest arbitration range at its assumed t_slop: the
  * apps' default, since it works between the most devices, however slow.
