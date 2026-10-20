@@ -29,6 +29,10 @@ export const PROFILES = {
   T50:  { id: 0x11, name: 'T50 — desk',   tqMs: 2, sync: 1, prop: 4,  ps1: 3, ps2: 2, sjw: 1, slopMs: 3 },
   T25:  { id: 0x12, name: 'T25 — room',   tqMs: 2, sync: 1, prop: 10, ps1: 6, ps2: 3, sjw: 2, slopMs: 3 },
   T10:  { id: 0x13, name: 'T10 — hall',   tqMs: 5, sync: 1, prop: 10, ps1: 6, ps2: 3, sjw: 2, slopMs: 5 },
+  // For devices whose own speaker-to-microphone path is slow: a MacBook Pro's
+  // built-in speaker and microphone measured 58–63 ms in Chrome. PROP_SEG must
+  // cover both ends' latency (spec §5.6), so 140 ms of a 200 ms bit.
+  T5:   { id: 0x14, name: 'T5 — slow',    tqMs: 10, sync: 1, prop: 14, ps1: 3, ps2: 2, sjw: 2, slopMs: 60 },
 };
 
 export const DEFAULT_BAND = 'A';
@@ -84,12 +88,24 @@ export function timing(profile) {
   };
 }
 
-/** Max segment radius in metres for a profile — spec §5.6. */
+/**
+ * Max segment radius in metres for a profile — spec §5.6. `slopMs` is t_slop,
+ * taken to be the same at every node: PROP_SEG covers it twice, once for the
+ * node whose edge the other synchronized to and once for the node answering.
+ */
 export function maxRange(profile, slopMs) {
   const p = typeof profile === 'string' ? PROFILES[profile] : profile;
   const slop = slopMs === undefined ? p.slopMs : slopMs;
   const propMs = p.prop * p.tqMs;
-  return Math.max(0, ((propMs - slop) / 1000) * SPEED_OF_SOUND / 2);
+  return Math.max(0, ((propMs - 2 * slop) / 1000) * SPEED_OF_SOUND / 2);
+}
+
+/**
+ * The fastest profile that can still arbitrate on a device whose t_slop is
+ * `slopMs` (spec §5.6), or null if none can.
+ */
+export function fastestProfileFor(slopMs) {
+  return Object.keys(PROFILES).find((key) => maxRange(key, slopMs) > 0) ?? null;
 }
 
 /**

@@ -12,7 +12,9 @@ import {
 } from '../../src/tincan/modem.js';
 import { Session } from '../../src/tincan/transport.js';
 import { formatFrame } from '../../src/tincan/frame.js';
-import { $, el, LogView, topbar, escapeHtml, download, fillMicrophones, reportHeader, reportName } from '../ui.js';
+import {
+  $, el, LogView, topbar, escapeHtml, download, fillMicrophones, reportHeader, reportName, saveMeasuredLatency,
+} from '../ui.js';
 import {
   buildProbeSignal, analyseSelf, analysePeer, assess, encodeWav, RECORD_SECONDS, TONE_HZ,
 } from './probe.js';
@@ -258,12 +260,14 @@ $('#measure').addEventListener('click', async () => {
     results.self = ownResult;
     results.fs = fs;
     results.reportedLatency = reported;
+    // The Console uses this, for this microphone, in place of the browser's figure.
+    if (ownResult.heard) saveMeasuredLatency(results.input?.label, ownResult.latency);
     const unheard = { silent: 'microphone silent', late: 'heard, too late', unmatched: 'signal not recognised' };
     setMicState(ownResult.heard ? 'measured' : unheard[ownResult.why] || 'heard nothing', ownResult.heard ? 'ok' : 'bad');
     $('#micsummary').textContent = ownResult.heard
       ? `Speaker-to-microphone latency ${(ownResult.latency * 1000).toFixed(1)} ms`
         + (reported > 0 ? ` (the browser reports ${(reported * 1000).toFixed(1)} ms)` : '')
-        + ` at ${fs} Hz, from ${results.input?.label || 'the default microphone'}.`
+        + ` at ${fs} Hz, from ${results.input?.label || 'the default microphone'}. The Console will use this figure.`
       : `This device did not hear its own test signal through ${results.input?.label || 'the default microphone'}; `
         + 'see below for why. Download the recording to look at what it did hear.';
     render();

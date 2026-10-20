@@ -133,7 +133,7 @@ async function run() {
     // reverberant energy relative to the direct sound at 1 m: 1/rc² (bus.js)
     reverbLevel: 1 / (Number($('#rc').value) / 10) ** 2,
     selfGain: Number($('#selfgain').value),
-    selfDelayMs: Number($('#selflat').value),
+    deviceLatencyMs: Number($('#selflat').value),
     nodes: specs,
     random: mulberry32(Number($('#seed').value) || 1),
   });

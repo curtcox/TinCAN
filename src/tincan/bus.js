@@ -91,6 +91,11 @@ export class AcousticChannel {
    * @param {number} [opts.reverbLevel] reverberant energy relative to the direct sound at 1 m
    * @param {number} [opts.reverbSeed] seed for the reverberant tail's echo pattern
    * @param {number} [opts.selfDelayMs] speaker-to-own-microphone latency
+   * @param {number} [opts.deviceLatencyMs] each node's own audio path, output
+   *   plus input, added to every path it sends or hears on (a node spec's
+   *   `latencyMs` overrides it). Half is taken as output and half as input, so
+   *   a path between two nodes gets the mean of theirs, and a node's own echo
+   *   all of its own.
    * @param {number} [opts.selfGain] how loudly a node hears itself
    * @param {() => number} [opts.random] uniform [0,1) source, for repeatability
    */
@@ -105,6 +110,7 @@ export class AcousticChannel {
     this.t = timing(PROFILES[this.profile] || this.profile);
 
     const selfDelayMs = opts.selfDelayMs ?? 1;
+    const latency = (i) => ((this.nodes[i].spec.latencyMs ?? opts.deviceLatencyMs ?? 0) / 1000) * this.sampleRate;
     const selfGain = opts.selfGain ?? 1;
 
     this.nodes = opts.nodes.map((spec, i) => {
@@ -130,12 +136,13 @@ export class AcousticChannel {
       this.delay[i] = [];
       this.gain[i] = [];
       for (let j = 0; j < N; j++) {
+        const device = Math.round((latency(i) + latency(j)) / 2);
         if (i === j) {
-          this.delay[i][j] = Math.max(1, Math.round((selfDelayMs / 1000) * this.sampleRate));
+          this.delay[i][j] = device + Math.max(1, Math.round((selfDelayMs / 1000) * this.sampleRate));
           this.gain[i][j] = selfGain;
         } else {
           const d = Math.hypot(this.nodes[i].x - this.nodes[j].x, this.nodes[i].y - this.nodes[j].y);
-          this.delay[i][j] = Math.max(1, Math.round((d / SPEED_OF_SOUND) * this.sampleRate));
+          this.delay[i][j] = device + Math.max(1, Math.round((d / SPEED_OF_SOUND) * this.sampleRate));
           this.gain[i][j] = 1 / Math.max(0.25, d);
         }
         maxDelay = Math.max(maxDelay, this.delay[i][j]);

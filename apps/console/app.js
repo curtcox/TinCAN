@@ -3,14 +3,16 @@
  */
 
 import { Modem, checkSupport } from '../../src/tincan/modem.js';
-import { BANDS, PROFILES, DETECTOR_DEFAULTS, timing, maxRange } from '../../src/tincan/params.js';
+import {
+  BANDS, PROFILES, DETECTOR_DEFAULTS, timing, maxRange, fastestProfileFor,
+} from '../../src/tincan/params.js';
 import { buildTransmission, formatFrame } from '../../src/tincan/frame.js';
 import {
   Session, baseId, describeId, PRIO, TOPIC, segment,
 } from '../../src/tincan/transport.js';
 import {
   $, el, hex, hexBytes, parseHexBytes, parseId, db, download, reportHeader, reportName,
-  LogView, topbar, escapeHtml, drawBits, drawMeter, fillMicrophones,
+  LogView, topbar, escapeHtml, drawBits, drawMeter, fillMicrophones, micName, measuredLatency,
 } from '../ui.js';
 
 $('#chrome').replaceWith(topbar('Console'));
@@ -35,22 +37,47 @@ profSel.value = 'T25';
 $('#callsign').value = ['ada', 'bob', 'cyd', 'dee', 'eli', 'fay'][Math.floor(Math.random() * 6)];
 $('#address').value = String(1 + Math.floor(Math.random() * 30));
 
+/**
+ * t_slop for `profile` from the self-test's measurement through microphone
+ * `name` (spec §5.6), or null when that microphone has not been measured.
+ */
+function measuredSlop(name, profile) {
+  const m = measuredLatency(name);
+  return m ? { ...m, slopMs: m.ms + timing(profile).tq * 250 } : null;
+}
+
 function describePhy() {
   const t = timing(profSel.value);
   const b = BANDS[bandSel.value];
+  const name = micName($('#mic').selectedOptions[0]?.textContent);
+  const m = name && measuredSlop(name, profSel.value);
+  let range;
+  if (!m) {
+    range = `Arbitration good to about ${maxRange(profSel.value).toFixed(1)} m, if this device's own audio path is `
+      + 'fast; <a href="../selftest/">measure it</a> in the Self-test to know.';
+  } else if (maxRange(profSel.value, m.slopMs) > 0) {
+    range = `Through ${escapeHtml(name)} this device hears itself ${m.ms.toFixed(1)} ms late (measured `
+      + `${m.at.slice(0, 10)}), so arbitration is good to about ${maxRange(profSel.value, m.slopMs).toFixed(1)} m.`;
+  } else {
+    const best = fastestProfileFor(m.slopMs);
+    range = `<b>Through ${escapeHtml(name)} this device hears itself ${m.ms.toFixed(1)} ms late (measured `
+      + `${m.at.slice(0, 10)}), more than ${profSel.value}'s ${PROFILES[profSel.value].prop * PROFILES[profSel.value].tqMs} ms `
+      + `PROP_SEG allows: it will misread its own bits.</b> `
+      + (best ? `Choose ${best}, and have every node on the bus do the same.` : 'No profile allows that much.');
+  }
   $('#phynote').innerHTML =
     `${b.fR} Hz recessive, ${b.fD} Hz dominant. `
     + `${Math.round(t.bitRate)} bit/s — an 8-octet frame takes about `
-    + `${(123 / t.bitRate).toFixed(1)} s of bus time. Arbitration good to about `
-    + `${maxRange(profSel.value).toFixed(1)} m.`
+    + `${(123 / t.bitRate).toFixed(1)} s of bus time. ${range}`
     + (bandSel.value === 'A' ? ' <b>This band is audible.</b>' : '');
   updateHints();
 }
 bandSel.addEventListener('change', describePhy);
 profSel.addEventListener('change', describePhy);
+$('#mic').addEventListener('change', describePhy);
 describePhy();
 
-fillMicrophones($('#mic'), $('#micadvice'));
+fillMicrophones($('#mic'), $('#micadvice')).then(describePhy);
 
 $('#amp').addEventListener('input', (e) => {
   const v = Number(e.target.value) / 100;
@@ -133,7 +160,8 @@ $('#start').addEventListener('click', async () => {
     });
     wire(modem);
     await modem.start();
-    fillMicrophones($('#mic'), $('#micadvice'));     // now the browser will name them
+    fillMicrophones($('#mic'), $('#micadvice')).then(describePhy);     // now the browser will name them
+    useMeasuredLatency();
     showAudio();
 
     // The Session helper is written against the pure Protocol interface, so
@@ -203,12 +231,30 @@ function warnOnce(key, text) {
   log.add(escapeHtml(text), 'warnrow');
 }
 
+/**
+ * Give the node the latency the self-test measured through the microphone it
+ * actually got, and say so if the profile cannot absorb it.
+ */
+function useMeasuredLatency() {
+  const label = modem.diagnostics().input?.label;
+  const m = label && measuredLatency(label);
+  if (!m) return;
+  modem.measuredLatencyMs = m.ms;
+  if (maxRange(profSel.value, modem.measuredSlopMs) > 0) return;
+  const best = fastestProfileFor(modem.measuredSlopMs);
+  warnOnce('latency', `This device hears itself ${m.ms.toFixed(1)} ms late through ${micName(label)}, as the `
+    + `self-test measured on ${m.at.slice(0, 10)}: more than ${profSel.value} allows, so it will misread its own `
+    + `bits and every frame it sends will fail. `
+    + (best ? `Leave, choose ${best}, and join again; every node on the bus must use the same profile.` : ''));
+}
+
 /** What the browser gave this node: shown in Diagnostics, and in the report. */
 function showAudio() {
   if (!modem) return;
   const d = modem.diagnostics();
   $('#dfs').textContent = d.sampleRate ? `${d.sampleRate} Hz` : '—';
-  $('#dlat').textContent = d.measuredSlopMs ? `${d.measuredSlopMs.toFixed(1)} ms` : '—';
+  $('#dlat').textContent = d.measuredSlopMs
+    ? `${d.measuredSlopMs.toFixed(1)} ms ${d.latencySource === 'measured' ? 'measured' : 'reported'}` : '—';
   $('#drange').textContent = d.maxRange !== null ? `${d.maxRange.toFixed(1)} m` : '—';
   setAudioState(d.stalled ? 'audio stalled' : `audio ${d.audioState}`,
     d.stalled || d.audioState !== 'running' ? 'bad' : 'ok');

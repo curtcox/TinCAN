@@ -18,7 +18,9 @@
  *                             in the ACK slot after its last dominant bit
  */
 
-import { BANDS, PROFILES, DETECTOR_DEFAULTS, timing, nearFarMarginDb } from '../../src/tincan/params.js';
+import {
+  BANDS, PROFILES, DETECTOR_DEFAULTS, SPEED_OF_SOUND, timing, nearFarMarginDb,
+} from '../../src/tincan/params.js';
 import { wirelessMicReason } from '../../src/tincan/modem.js';
 
 /** Peak output level: the Console's default transmit level. */
@@ -177,8 +179,12 @@ function profileTiming(fs) {
       w: Math.max(8, Math.round(t.window * fs)),
       samplePoint: t.samplePoint,
       bitTime: t.bitTime,
-      /** Latency beyond which a transmitter's own bit is still arriving when its window opens. */
-      latencyLimit: (t.sync + t.prop) * t.tq,
+      /**
+       * The most latency this device can have when the other device is as
+       * slow and a metre away: both devices' latency and the round trip must
+       * pass before the window opens (spec §5.6).
+       */
+      latencyLimit: ((t.sync + t.prop) * t.tq - 2 / SPEED_OF_SOUND) / 2,
     };
   });
 }
@@ -479,12 +485,13 @@ export function assess(self, peer = null, { microphone = '', builtIn } = {}) {
   if (self.heard) {
     const limits = profileTiming(48000).map((p) => [p.key, p.latencyLimit]);
     const [slowest, most] = limits.reduce((a, b) => (b[1] > a[1] ? b : a));
+    const fastest = limits.find(([, limit]) => self.latency < limit)?.[0];
     const ms = self.latency * 1000;
     general.push({
       name: 'latency',
       ok: self.latency < most,
       detail: self.latency < most
-        ? `${ms.toFixed(1)} ms from speaker to microphone; see each profile below for whether that is short enough`
+        ? `${ms.toFixed(1)} ms from speaker to microphone: ${fastest} is the fastest profile that allows it`
         : `${ms.toFixed(1)} ms from speaker to microphone, longer than any profile allows (${slowest}, the most `
           + `tolerant, allows ${(most * 1000).toFixed(0)} ms), so no setting will work. Delays this long `
           + `usually mean a wireless microphone — an iPhone through Continuity, AirPods, a Bluetooth headset — `
@@ -520,8 +527,9 @@ export function assess(self, peer = null, { microphone = '', builtIn } = {}) {
     checks.push(self.heard ? {
       name: 'latency',
       ok: self.latency < latencyLimit,
-      detail: `${(self.latency * 1000).toFixed(1)} ms speaker-to-microphone; ${key} allows ${(latencyLimit * 1000).toFixed(0)} ms`
-        + (self.latency < latencyLimit ? '' : ' before a transmitter misreads its own bits'),
+      detail: `${(self.latency * 1000).toFixed(1)} ms speaker-to-microphone; ${key} allows ${(latencyLimit * 1000).toFixed(0)} ms `
+        + 'with another device as slow, a metre away'
+        + (self.latency < latencyLimit ? '' : ': its acknowledgements and dominant bits arrive after the other device has sampled'),
     } : { name: 'latency', ok: null, detail: 'not measured' });
 
     if (s) {

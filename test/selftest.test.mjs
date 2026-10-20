@@ -82,7 +82,9 @@ test('the self check measures a room\'s decay and flags an echo that can fake an
   assert.ok(self.rt60 > 0.35 && self.rt60 < 0.65, `RT60 ${self.rt60} s`);
 
   const a = assess(self);
-  assert.equal(verdict(a, 'T25', 'latency').ok, true);
+  // 12 ms at each of two devices is 24 ms before distance: past T25's 22 ms.
+  assert.equal(verdict(a, 'T25', 'latency').ok, false);
+  assert.equal(verdict(a, 'T10', 'latency').ok, true);
   assert.equal(verdict(a, 'T25', 'own echo in the ACK slot').ok, false,
     'half a second of reverberation is still well above the noise 114 ms after a bit');
 });
@@ -158,7 +160,7 @@ test('a delay no profile can absorb is called out, with the usual cause', () => 
 
   const a = assess(self, null, { microphone: '2024 iPhone 16 Microphone' });
   assert.equal(general(a, 'latency').ok, false);
-  assert.match(general(a, 'latency').detail, /longer than any profile allows \(T10.*55 ms\)/);
+  assert.match(general(a, 'latency').detail, /longer than any profile allows \(T5.*72 ms\)/);
   assert.match(general(a, 'latency').detail, /built-in microphone/);
   assert.equal(general(a, 'microphone').ok, false);
   assert.match(general(a, 'microphone').detail, /iPhone 16/);

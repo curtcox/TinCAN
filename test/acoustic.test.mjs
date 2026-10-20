@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { AcousticChannel, mulberry32 } from '../src/tincan/bus.js';
-import { maxRange, nearFarMarginDb, timing, PROFILES } from '../src/tincan/params.js';
+import { maxRange, nearFarMarginDb, timing, PROFILES, fastestProfileFor } from '../src/tincan/params.js';
 
 function channel(opts = {}) {
   return new AcousticChannel({
@@ -274,9 +274,13 @@ test('the near-far limit of §4.6 is real, and fails the way the spec says it do
   });
 
 test('published range and margin figures match the parameters they are derived from', () => {
-  assert.ok(Math.abs(maxRange('T25') - 2.9) < 0.1, `${maxRange('T25')}`);
-  assert.ok(Math.abs(maxRange('T10') - 7.7) < 0.1, `${maxRange('T10')}`);
-  assert.ok(Math.abs(maxRange('T50') - 0.86) < 0.05, `${maxRange('T50')}`);
+  // t_slop counted at both ends (spec §5.6), with the per-profile defaults.
+  assert.ok(Math.abs(maxRange('T100') - 0.17) < 0.05, `${maxRange('T100')}`);
+  assert.ok(Math.abs(maxRange('T50') - 0.34) < 0.05, `${maxRange('T50')}`);
+  assert.ok(Math.abs(maxRange('T25') - 2.4) < 0.1, `${maxRange('T25')}`);
+  assert.ok(Math.abs(maxRange('T10') - 6.9) < 0.1, `${maxRange('T10')}`);
+  assert.ok(Math.abs(maxRange('T5') - 3.4) < 0.1, `${maxRange('T5')}`);
+  assert.equal(timing('T5').bitTime, 0.2);
   assert.ok(Math.abs(nearFarMarginDb() + 8.6) < 0.1, `${nearFarMarginDb()}`);
 
   for (const [name, p] of Object.entries(PROFILES)) {
@@ -391,7 +395,9 @@ test('T25 tolerates 45 ms of speaker-to-microphone latency, a typical browser ro
     assert.equal(got.length, 1);
   });
 
-test('T10 tolerates 45 ms of speaker-to-microphone latency', () => {
+test('at T10 a transmitter reads its own bits through 45 ms of its own loopback latency', () => {
+  // Only the node's own echo is late here; its peer's audio path is instant.
+  // Real peers have audio paths too: see the device-latency tests below.
   const { ch, a, got } = pair({ profile: 'T10', selfDelayMs: 45 });
   a.send({ id: 0x123, data: [1, 2, 3, 4] });
   ch.run(20);
@@ -399,6 +405,73 @@ test('T10 tolerates 45 ms of speaker-to-microphone latency', () => {
   assert.equal(got.length, 1);
   assert.equal(a.stats.framesSent, 1);
   assert.equal(a.stats.bitErrors, 0);
+});
+
+/*
+ * Device latency. Every node's audio path, speaker and microphone, delays
+ * everything it sends and hears, not only its own echo. A node synchronized
+ * to another lags it by both their paths, and its answer comes back later by
+ * both again, so PROP_SEG must cover twice t_slop (spec §5.6).
+ */
+function devicePair(profile, latencyMs, distance = 1) {
+  const ch = channel({
+    profile, deviceLatencyMs: latencyMs, selfDelayMs: 0.5,
+    nodes: [{ name: 'primer', x: 0.4, y: -0.3 }, { name: 'lo', x: 0, y: 0 }, { name: 'hi', x: distance, y: 0 }],
+  });
+  return { ch, nodes: ch.protocols };
+}
+
+function deliver(profile, latencyMs) {
+  const { ch, nodes: [, a, b] } = devicePair(profile, latencyMs);
+  const got = collect(b, 'frame');
+  a.send({ id: 0x123, data: [1, 2, 3, 4] });
+  ch.run(130 * timing(profile).bitTime);
+  return { a, got };
+}
+
+test('PROP_SEG must cover the audio latency at both ends, as spec §5.6 now says', () => {
+  // T10: SYNC + PROP_SEG is 55 ms. Two 20 ms devices a metre apart need
+  // 2 × (20 + 1.25) + 2 × 2.9 = 48 ms; two 30 ms devices need 68 ms.
+  const fast = deliver('T10', 20);
+  assert.equal(fast.got.length, 1, 'T10 between two 20 ms devices: delivered');
+  assert.equal(fast.a.stats.framesSent, 1);
+
+  const slow = deliver('T10', 30);
+  assert.equal(slow.got.length, 0, 'T10 between two 30 ms devices: not delivered');
+  assert.equal(slow.a.stats.formErrors, 1, 'the transmitter reads the late acknowledgement in the ACK delimiter');
+  assert.equal(slow.a.stats.bitErrors, 0, 'it still reads its own bits: counting t_slop once would say this works');
+});
+
+test('T5 carries frames between two laptops whose audio paths take 60 ms', () => {
+  // The figure measured from a MacBook Pro's built-in speaker to its built-in
+  // microphone, in Chrome. No faster profile can do this (see above).
+  const { a, got } = deliver('T5', 60);
+  assert.equal(got.length, 1);
+  assert.equal(a.stats.framesSent, 1);
+  assert.equal(a.stats.bitErrors + a.stats.formErrors + a.stats.ackErrors, 0);
+
+  const t10 = deliver('T10', 60);
+  assert.equal(t10.got.length, 0, 'and T10 cannot');
+});
+
+test('T5 arbitrates between two laptops whose audio paths take 60 ms', () => {
+  const { ch, nodes: [primer, lo, hi] } = devicePair('T5', 60);
+  const loGot = collect(lo, 'frame');
+  const hiGot = collect(hi, 'frame');
+  ch.run(0.5);
+  primer.send({ id: 0x7ff, data: [0] });
+  assert.ok(ch.runUntil(() => primer.transmitting, 20), 'primer never got the bus');
+  ch.run(20 * timing('T5').bitTime);
+  lo.send({ id: 0x201, data: [1] });
+  hi.send({ id: 0x205, data: [2] });
+  ch.run(200 * timing('T5').bitTime);
+
+  assert.equal(hi.stats.arbitrationsLost, 1, 'the higher identifier withdrew');
+  assert.equal(lo.stats.arbitrationsLost, 0);
+  assert.equal(lo.stats.framesSent, 1);
+  assert.equal(hi.stats.framesSent, 1, 'and sent once the bus was free');
+  assert.deepEqual(hiGot.map((f) => f.frame.id), [0x7ff, 0x201]);
+  assert.deepEqual(loGot.map((f) => f.frame.id), [0x7ff, 0x205]);
 });
 
 test('frames cross a lightly reverberant room, critical distance about 3 m', () => {
@@ -482,3 +555,15 @@ test('two laptops a metre apart in an ordinary office exchange frames',
       assert.equal(b.stats.framesSent, 1, `${profile}: b was acknowledged`);
     }
   });
+
+test('a slow audio path is steered to the fastest profile whose PROP_SEG covers it', () => {
+  assert.equal(fastestProfileFor(1), 'T100');
+  assert.equal(fastestProfileFor(3), 'T50');
+  assert.equal(fastestProfileFor(8), 'T25');
+  assert.equal(fastestProfileFor(20), 'T10');
+  // A MacBook Pro's built-in speaker and microphone, measured in Chrome.
+  assert.equal(fastestProfileFor(58.6 + 2.5), 'T5');
+  assert.ok(maxRange('T5', 61.1) > 3);
+  // An iPhone used as the microphone, through Continuity.
+  assert.equal(fastestProfileFor(168.7), null);
+});

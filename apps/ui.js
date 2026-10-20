@@ -128,6 +128,34 @@ function versionBadge() {
   return badge;
 }
 
+/**
+ * A microphone's own name, from a device label or a picker option: without
+ * Chrome's "Default - " prefix or the picker's "system default (…)".
+ */
+export function micName(label) {
+  const s = String(label || '');
+  const m = /^system default \((.*)\)$/.exec(s);
+  return (m ? m[1] : s).replace(/^default\s*[-–:]\s*/i, '').trim();
+}
+
+const LATENCY_KEY = 'tincan.latency';
+
+/** Remember the speaker-to-microphone latency the self-test measured through `label`. */
+export function saveMeasuredLatency(label, seconds) {
+  try {
+    const all = JSON.parse(localStorage.getItem(LATENCY_KEY) || '{}');
+    all[micName(label)] = { ms: Math.round(seconds * 10000) / 10, at: new Date().toISOString(), build: BUILD.commit };
+    localStorage.setItem(LATENCY_KEY, JSON.stringify(all));
+  } catch { /* not remembered */ }
+}
+
+/** The latency measured through `label`, as { ms, at, build }, or null if never measured. */
+export function measuredLatency(label) {
+  try {
+    return JSON.parse(localStorage.getItem(LATENCY_KEY) || '{}')[micName(label)] || null;
+  } catch { return null; }
+}
+
 /** What every downloaded report starts with, so it says which build made it. */
 export function reportHeader() {
   return {

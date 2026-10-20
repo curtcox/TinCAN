@@ -171,7 +171,7 @@ test('Modem.diagnostics reports what the browser actually gave the node', async 
   assert.equal(d.input.label, 'Built-in Microphone');
   assert.equal(d.input.settings.echoCancellation, false);
   assert.ok(d.measuredSlopMs > 30, `${d.measuredSlopMs} ms: 20 out, 10 in, and a quarter TQ`);
-  assert.ok(d.maxRange > 0);
+  assert.equal(d.maxRange, 0, 'T10\'s 50 ms PROP_SEG cannot cover 31 ms at both ends (spec §5.6)');
   assert.equal(d.profile, 'T10');
 });
 
@@ -258,4 +258,17 @@ test('a browser with no "default" microphone entry is left to pick its own defau
   assert.deepEqual(calls.constraints, { audio: CAPTURE_CONSTRAINTS });
   assert.deepEqual(await audioConstraints(''), CAPTURE_CONSTRAINTS);
   assert.deepEqual(await audioConstraints('mic1'), { ...CAPTURE_CONSTRAINTS, deviceId: { exact: 'mic1' } });
+});
+
+test('a latency measured by the self-test replaces the browser\'s figure for t_slop and range', async () => {
+  fakeBrowser();
+  const modem = new Modem({ profile: 'T10' });
+  await modem.start();
+  assert.equal(modem.diagnostics().latencySource, 'reported by the browser');
+  assert.ok(modem.maxRange > 1, 'the browser reports 20 ms; T10 has 50 ms of PROP_SEG for twice that');
+
+  modem.measuredLatencyMs = 58.6;               // a MacBook Pro's built-in speaker and microphone
+  assert.equal(modem.measuredSlopMs, 58.6 + 1.25, 'plus a detector hop, TQ/4');
+  assert.equal(modem.maxRange, 0, 'T10 cannot absorb it');
+  assert.equal(modem.diagnostics().latencySource, 'measured');
 });

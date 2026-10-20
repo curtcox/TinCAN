@@ -53,7 +53,7 @@ export class Modem extends EventTarget {
   /**
    * @param {object} [opts]
    * @param {'A'|'B'|'C'|'D'} [opts.band]
-   * @param {'T100'|'T50'|'T25'|'T10'} [opts.profile]
+   * @param {'T100'|'T50'|'T25'|'T10'|'T5'} [opts.profile]
    * @param {'node'|'listener'} [opts.mode]
    * @param {number} [opts.amplitude]
    * @param {string} [opts.name]
@@ -82,9 +82,15 @@ export class Modem extends EventTarget {
   get timing() { return timing(this.opts.profile); }
   get maxRange() { return maxRange(this.opts.profile, this.measuredSlopMs); }
 
-  /** Combined output + input latency, milliseconds, if the browser reports it. */
+  /**
+   * t_slop in milliseconds (spec §5.6): the speaker-to-microphone latency
+   * measured by the self-test when one has been set in `measuredLatencyMs`,
+   * otherwise output plus input latency as the browser reports them, which
+   * leaves out the device's own processing. Either way plus a detector hop.
+   */
   get measuredSlopMs() {
     if (!this.ctx) return undefined;
+    if (this.measuredLatencyMs != null) return this.measuredLatencyMs + (this.timing.tq / 4) * 1000;
     const out = (this.ctx.outputLatency || this.ctx.baseLatency || 0) * 1000;
     const settings = this.stream && this.stream.getAudioTracks()[0]?.getSettings?.();
     const inp = settings && settings.latency ? settings.latency * 1000 : 0;
@@ -180,6 +186,7 @@ export class Modem extends EventTarget {
       baseLatency: this.ctx ? this.ctx.baseLatency ?? null : null,
       outputLatency: this.ctx ? this.ctx.outputLatency ?? null : null,
       measuredSlopMs: this.measuredSlopMs ?? null,
+      latencySource: this.measuredLatencyMs != null ? 'measured' : 'reported by the browser',
       maxRange: this.ctx ? this.maxRange : null,
       input: track ? { label: track.label || '', settings: track.getSettings ? track.getSettings() : {} } : null,
       stalled: this.stalled,

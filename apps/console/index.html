@@ -166,8 +166,8 @@
         </div>
         <div class="stats">
           <div class="stat"><span>sample rate</span><b id="dfs">—</b></div>
-          <div class="stat" title="output plus input latency as the browser reports it; the self-test measures the real figure"><span>reported latency</span><b id="dlat">—</b></div>
-          <div class="stat" title="arbitration range for this profile, allowing for the reported latency"><span>range</span><b id="drange">—</b></div>
+          <div class="stat" title="t_slop: speaker-to-microphone latency as the self-test measured it for this microphone, or else as the browser reports it, which leaves out the device's own processing"><span>latency</span><b id="dlat">—</b></div>
+          <div class="stat" title="arbitration range for this profile, allowing for that latency"><span>range</span><b id="drange">—</b></div>
           <div class="stat"><span>bits seen</span><b id="dbits">0</b></div>
           <div class="stat"><span>overloads</span><b id="dover">0</b></div>
           <div class="stat" title="the audio thread stopped reporting"><span>stalls</span><b id="dstall">0</b></div>
@@ -193,7 +193,8 @@
             <li><b>"no node acknowledged" on every frame</b> — the other device is not joined, is muted, is on a
               different band or bit timing, or cannot hear this one. Watch its Signal panel while this one sends.</li>
             <li><b>Bit errors on this node's own frames</b> — it hears itself too late or through too much echo.
-              Try T10, which tolerates more of both; the microphone check gives the figure.</li>
+              Try a slower profile: T10 for echo, T5 for a slow audio path such as a laptop's built-in speaker
+              and microphone. The microphone check measures this device and names the fastest that fits.</li>
             <li><b>The carrier pill never goes out, and the queue never empties</b> — the room is louder in the
               TinCAN band than the detector expects, or another sound source is on these frequencies.</li>
             <li><b>Collisions whenever both devices have something to send</b> — each hears itself too loudly

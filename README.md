@@ -73,10 +73,16 @@ the transmitter's.
 
 | Profile | Bit rate | 8-octet frame | Arbitration range | For |
 |---|---|---|---|---|
-| `T100` | 100 bit/s | 1.2 s | ~0.3 m | bench, cable, loopback |
-| `T50` | 50 bit/s | 2.5 s | ~0.9 m | two devices on a desk |
-| `T25` *(default)* | 25 bit/s | 4.9 s | ~2.9 m | a room |
-| `T10` | 10 bit/s | 12.3 s | ~7.7 m | a hall, or a reverberant one |
+| `T100` | 100 bit/s | 1.2 s | ~0.2 m | bench, cable, loopback |
+| `T50` | 50 bit/s | 2.5 s | ~0.3 m | two devices on a desk |
+| `T25` *(default)* | 25 bit/s | 4.9 s | ~2.4 m | a room |
+| `T10` | 10 bit/s | 12.3 s | ~6.9 m | a hall, or a reverberant one |
+| `T5` | 5 bit/s | 24.6 s | ~3.4 m | devices with a slow audio path, such as laptops' built-in speakers and microphones |
+
+The ranges assume each device's own audio path, speaker to microphone, takes
+no more than 1 ms (`T100`), 3 ms (`T50`, `T25`), 5 ms (`T10`) or 60 ms (`T5`);
+the [Self-test](https://curtcox.github.io/TinCAN/apps/selftest/) measures it,
+and the Console uses the figure.
 
 If you want to move bytes over sound, use a packet modem —
 [Wavest](https://github.com/curtcox/Wavest) and the ggwave codec underneath it
