@@ -249,3 +249,88 @@ test('a queue drains in priority order regardless of submission order', () => {
 
   assert.deepEqual(seen.map((s) => s.frame.id), [0x010, 0x200, 0x700]);
 });
+
+/*
+ * Interframe-space recovery. On air, a node's view of the bus can differ from
+ * everyone else's for a bit: noise crosses the carrier threshold, or its bit
+ * clock lands its INTERMISSION a little behind the node that starts next.
+ * `stepWith` runs one bit of a wired-AND bus but lets each node be shown
+ * something different.
+ */
+function stepWith(nodes, view) {
+  const tx = nodes.map((n) => n.beginBit());
+  const carrier = tx.some((l) => l !== null);
+  const level = tx.some((l) => l === DOMINANT) ? DOMINANT : RECESSIVE;
+  nodes.forEach((n, i) => {
+    const seen = view(i, level, carrier);
+    if (seen) n.endBit(...seen);            // null: this node misses the bit
+  });
+}
+
+/** a sends 0x100 and b sends 0x200, which b starts as soon as 0x100's IFS ends. */
+function backToBack() {
+  const a = new Protocol({ name: 'a' });
+  const b = new Protocol({ name: 'b' });
+  const c = new Protocol({ name: 'c', mode: 'listener' });
+  a.send({ id: 0x100, data: [1] });
+  b.send({ id: 0x200, data: [2] });
+  return { a, b, c, nodes: [a, b, c], got: collect(c, 'frame'), overloads: collect(c, 'overload') };
+}
+
+function errorCount(...nodes) {
+  return nodes.reduce((n, p) => n + p.stats.bitErrors + p.stats.stuffErrors + p.stats.crcErrors
+    + p.stats.formErrors + p.stats.ackErrors, 0);
+}
+
+test('one noisy dominant bit in INTERMISSION does not cost a node the next frame', () => {
+  const { a, b, c, nodes, got, overloads } = backToBack();
+  let glitched = false;
+  for (let i = 0; i < 400; i++) {
+    stepWith(nodes, (k, level, carrier) => {
+      if (k === 2 && !glitched && c.state === 'intermission') { glitched = true; return [DOMINANT, true]; }
+      return [level, carrier];
+    });
+  }
+
+  assert.ok(glitched);
+  assert.deepEqual(got.map((g) => g.frame.id), [0x100, 0x200], 'c received both frames');
+  assert.equal(overloads.length, 0, 'a lone bit followed by silence is not an overload flag');
+  assert.equal(errorCount(a, b, c), 0);
+});
+
+test('a node whose INTERMISSION runs a bit late takes the next SYNC as a frame, not an overload', () => {
+  // c's bit clock slips one bit behind during EOF (it misses a bit), so b's
+  // first SYNC bit lands in c's last INTERMISSION bit — the CAN "dominant in
+  // the third IFS bit is SOF" case.
+  const { a, b, c, nodes, got, overloads } = backToBack();
+  let slipped = false;
+  for (let i = 0; i < 400; i++) {
+    stepWith(nodes, (k, level, carrier) => {
+      if (k === 2 && !slipped && c.state === 'eof') { slipped = true; return null; }
+      return [level, carrier];
+    });
+  }
+
+  assert.ok(slipped);
+
+  assert.deepEqual(got.map((g) => g.frame.id), [0x100, 0x200], 'c received both frames');
+  assert.equal(overloads.length, 0);
+  assert.equal(errorCount(a, b, c), 0);
+});
+
+test('six dominant bits in INTERMISSION are still read as an overload flag', () => {
+  const { a, b, c, nodes, got, overloads } = backToBack();
+  let flag = 0;
+  for (let i = 0; i < 400; i++) {
+    if (!flag && c.state === 'intermission') flag = 6;
+    const forced = flag > 0;
+    if (forced) flag--;
+    stepWith(nodes, (k, level, carrier) => (forced ? [DOMINANT, true] : [level, carrier]));
+    if (forced && flag === 0) flag = -1;
+  }
+
+  assert.equal(overloads.length, 1, 'c recognised the overload flag');
+  assert.deepEqual(got.map((g) => g.frame.id), [0x100, 0x200], 'and still received the next frame');
+  assert.equal(b.stats.framesSent, 1);
+  assert.equal(errorCount(a, b), 0);
+});

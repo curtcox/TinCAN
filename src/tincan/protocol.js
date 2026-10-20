@@ -152,19 +152,24 @@ export class Protocol {
     const tx = this.txLevel;
     this.txLevel = null;
 
+    this.prevIdleCount = this.idleCount;
     if (!carrier) this.idleCount++; else this.idleCount = 0;
     if (this.errorState === ERROR_STATE.BUS_OFF) this._trackBusOffRecovery(carrier, level);
 
+    this._handleBit(level, carrier, tx);
+  }
+
+  _handleBit(level, carrier, tx) {
     switch (this.state) {
-      case STATE.BUS_IDLE:     this._bitBusIdle(level); break;
-      case STATE.SYNC:         this._bitSync(level); break;
+      case STATE.BUS_IDLE:     this._bitBusIdle(level, carrier); break;
+      case STATE.SYNC:         this._bitSync(level, carrier); break;
       case STATE.FRAME:        this._bitFrame(level, tx); break;
       case STATE.CRC_DELIM:    this._bitCrcDelim(level, tx); break;
       case STATE.ACK:          this._bitAck(level); break;
       case STATE.ACK_DELIM:    this._bitAckDelim(level, tx); break;
       case STATE.EOF:          this._bitEof(level); break;
-      case STATE.INTERMISSION: this._bitIntermission(level); break;
-      case STATE.SUSPEND:      this._bitSuspend(level); break;
+      case STATE.INTERMISSION: this._bitIntermission(level, carrier); break;
+      case STATE.SUSPEND:      this._bitSuspend(level, carrier); break;
       case STATE.ERROR_FLAG:   this._bitErrorFlag(); break;
       case STATE.ERROR_ECHO:   this._bitErrorEcho(level); break;
       case STATE.ERROR_DELIM:  this._bitErrorDelim(level); break;
@@ -222,9 +227,15 @@ export class Protocol {
   /* frame reception scaffolding                                       */
   /* ---------------------------------------------------------------- */
 
-  _enterSync() {
+  /**
+   * @param {object|null} [resume] for a receiver, where it was when the
+   *   dominant bit arrived, so that an isolated noise bit can be undone
+   */
+  _enterSync(resume = null) {
     this.state = STATE.SYNC;
     this.syncIndex = 0;
+    this.syncResume = resume;
+    if (resume) this.justTransmitted = false;
     this.warmIdle = false;
     this.frameStartBit = this.bitIndex;
   }
@@ -242,21 +253,35 @@ export class Protocol {
     this.ackSeen = RECESSIVE;
   }
 
-  _bitBusIdle(level) {
+  _bitBusIdle(level, carrier) {
     if (level === DOMINANT) {
       // Another node started; this is SYNC bit 0.
-      this._enterSync();
-      this._bitSync(level);
+      this._enterSync(this._resumePoint());
+      this._bitSync(level, carrier);
     }
   }
 
-  _bitSync(level) {
+  _bitSync(level, carrier) {
     const index = this.syncIndex;
     if (this.txItem) {
       this.txIndex = index + 1;
-    } else if (level !== SYNC_FIELD[index]) {
-      // Spec §6.2: abandon silently. Malformed SYNC is far more likely to be
-      // ambient noise than a protocol violation.
+    } else if (level !== SYNC_FIELD[index] || !carrier) {
+      // Spec §6.2: recessive is a tone, so a SYNC bit with no carrier is as
+      // malformed as one at the wrong level.
+      const resume = this.syncResume;
+      if (index === 1 && resume && !carrier) {
+        // A lone dominant bit followed by silence is noise, not a frame.
+        this._resumeAfterGlitch(resume);
+        return;
+      }
+      if (index === 1 && level === DOMINANT && resume && resume.state === STATE.INTERMISSION) {
+        // Two dominant bits where INTERMISSION was: an overload flag (§6.6).
+        this.emit('overload', {});
+        this.state = STATE.ERROR_ECHO;
+        return;
+      }
+      // Abandon silently. Malformed SYNC is far more likely to be ambient
+      // noise than a protocol violation.
       this.stats.framesAbandoned++;
       this.emit('abandoned', { reason: 'malformed SYNC', at: index });
       this._goIdle(false);
@@ -436,14 +461,16 @@ export class Protocol {
     this.expectStuffBit = false;
   }
 
-  _bitIntermission(level) {
-    this.ifsIndex++;
+  _bitIntermission(level, carrier) {
     if (level === DOMINANT) {
-      // Spec §6.6: a dominant bit in INTERMISSION is an overload frame, not SOF.
-      this.emit('overload', {});
-      this.state = STATE.ERROR_ECHO;
+      // Spec §6.8: the SOF of a node whose interframe space ended a little
+      // ahead of ours, the first bit of an overload flag, or noise. The SYNC
+      // field tells them apart on the next bit.
+      this._enterSync(this._resumePoint());
+      this._bitSync(level, carrier);
       return;
     }
+    this.ifsIndex++;
     if (this.ifsIndex >= IFS_BITS) {
       const wasTransmitter = this.justTransmitted;
       this.justTransmitted = false;
@@ -456,10 +483,46 @@ export class Protocol {
     }
   }
 
-  _bitSuspend(level) {
+  _bitSuspend(level, carrier) {
+    if (level === DOMINANT) {
+      this._enterSync(this._resumePoint());
+      this._bitSync(level, carrier);
+      return;
+    }
     this.suspendIndex++;
-    if (level === DOMINANT) { this._enterSync(); this._bitSync(level); return; }
     if (this.suspendIndex >= SUSPEND_BITS) this._goIdle(true);
+  }
+
+  /** Where a receiver was when a dominant bit sent it into SYNC. */
+  _resumePoint() {
+    return {
+      state: this.state,
+      warmIdle: this.warmIdle,
+      ifsIndex: this.ifsIndex,
+      suspendIndex: this.suspendIndex,
+      justTransmitted: this.justTransmitted,
+      idleCount: this.prevIdleCount,
+    };
+  }
+
+  /**
+   * Undo a SYNC that turned out to be one noisy bit: go back to where the node
+   * was and count the glitch and the bit after it as the silent bits they were.
+   * Without this, one false dominant reading in INTERMISSION used to cost the
+   * whole next frame.
+   */
+  _resumeAfterGlitch(r) {
+    this.stats.framesAbandoned++;
+    this.emit('abandoned', { reason: 'isolated dominant bit', at: 0 });
+    this.syncResume = null;
+    this.state = r.state;
+    this.warmIdle = r.warmIdle;
+    this.ifsIndex = r.ifsIndex;
+    this.suspendIndex = r.suspendIndex;
+    this.justTransmitted = r.justTransmitted;
+    this.idleCount = r.idleCount + 2;
+    this._handleBit(RECESSIVE, false, null);
+    this._handleBit(RECESSIVE, false, null);
   }
 
   _goIdle(warm) {
@@ -592,12 +655,14 @@ export class Protocol {
     this.state = STATE.BUS_IDLE;
     this.bitIndex = 0;
     this.idleCount = 0;
+    this.prevIdleCount = 0;
     this.warmIdle = false;
     this.txItem = null;
     this.txIndex = 0;
     this.txLevel = null;
     this.justTransmitted = false;
     this.syncIndex = 0;
+    this.syncResume = null;
     this.frameStartBit = 0;
     this.decoder.reset();
     this.rxWire = [];

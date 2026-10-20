@@ -72,19 +72,22 @@ test('"contention" — the lower identifier wins and the loser defers, at no cos
   assert.deepEqual(order, [0x201, 0x205], 'delivered in identifier order');
 });
 
-test('"cascade" — four contenders come out in strict identifier order',
-  { todo: 'a false dominant reading in INTERMISSION (noise crosses the carrier threshold ~0.2% of silent bits) drops far nodes into overload handling they never resynchronise from; they then transmit into the next frame\'s EOF. The old code hit this too, hidden because only counts were asserted' },
-  () => {
-    const { stats, delivered } = runScenario('cascade');
-    const ids = delivered.filter((d) => d.id !== 0x7ff).map((d) => d.id);
-    assert.deepEqual(ids, [0x030, 0x0a0, 0x140, 0x2c0]);
-    for (const n of ['n0', 'n1', 'n2', 'n3']) {
-      assert.equal(stats[n].framesSent, 1, `${n} got its frame out`);
-      assert.equal(stats[n].bitErrors, 0, `${n} saw no bit errors`);
-    }
-    const lost = ['n0', 'n1', 'n2', 'n3'].reduce((a, n) => a + stats[n].arbitrationsLost, 0);
-    assert.equal(lost, 3, 'four contenders cost exactly three withdrawals');
-  });
+test('"cascade" — four contenders come out in strict identifier order', () => {
+  const { stats, delivered } = runScenario('cascade');
+  const ids = delivered.filter((d) => d.id !== 0x7ff).map((d) => d.id);
+  assert.deepEqual(ids, [0x030, 0x0a0, 0x140, 0x2c0]);
+  for (const [n, s] of Object.entries(stats)) {
+    assert.equal(s.bitErrors + s.stuffErrors + s.crcErrors + s.formErrors + s.ackErrors, 0,
+      `${n} saw no errors of any kind`);
+  }
+  for (const n of ['n0', 'n1', 'n2', 'n3']) assert.equal(stats[n].framesSent, 1, `${n} got its frame out`);
+  // Every round, each remaining contender but the winner withdraws once: the
+  // highest identifier loses three times, the next two, the next one.
+  assert.equal(stats.n2.arbitrationsLost, 3, '0x2c0 withdrew in every round');
+  assert.equal(stats.n0.arbitrationsLost, 2, '0x140 withdrew twice');
+  assert.equal(stats.n3.arbitrationsLost, 1, '0x0a0 withdrew once');
+  assert.equal(stats.n1.arbitrationsLost, 0, '0x030 never withdrew');
+});
 
 test('"nearfar" — the far node is excluded, and the near node never notices',
   { todo: 'with the transmitter silent during ACK (§6.7), the excluded far node hears the acknowledgements for the near node\'s frame and believes its own was delivered' },

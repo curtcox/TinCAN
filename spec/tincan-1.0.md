@@ -543,10 +543,21 @@ serves four purposes:
    bearing bit arrives;
 4. it lets receivers with automatic gain control settle before `SOF`.
 
-A receiver that observes a `SYNC` field which does not match `01010101` at every
-sample point MUST abandon the frame and return to waiting for idle. It MUST NOT
-generate an error frame; a malformed `SYNC` is far more likely to be ambient
-noise than a protocol violation.
+A receiver MUST read carrier at every `SYNC` sample point, recessive bits
+included: recessive is a tone (§4.1), so silence where `SYNC` expects recessive is
+a mismatch. A receiver that observes a `SYNC` field which does not match
+`01010101` at every sample point MUST abandon the frame and return to waiting for
+idle. It MUST NOT generate an error frame; a malformed `SYNC` is far more likely
+to be ambient noise than a protocol violation.
+
+One mismatch is handled differently. If a receiver entered `SYNC` on a single
+dominant bit read while idle, in `INTERMISSION`, or in suspend transmission, and
+then reads **no carrier** at `SYNC` bit 1, that dominant bit was noise crossing
+the carrier threshold. The receiver MUST disregard it and resume exactly where it
+was, counting both bits as the silent bits they were — in particular it MUST NOT
+lose its place in the interframe space, its warm idle (§4.5), or its suspend
+count. Otherwise a single noisy bit in a gap between frames costs the node the
+next frame.
 
 ### 6.3 Data frame
 
@@ -635,6 +646,9 @@ of the interframe space, and does not affect error counters. It requests
 additional delay before the next frame. Support is OPTIONAL for transmission and
 REQUIRED for reception. At most 2 consecutive overload frames may be generated.
 
+A receiver recognises an overload flag as a dominant bit in `INTERMISSION`
+followed by a second dominant bit (§6.8).
+
 ### 6.7 Acknowledgement
 
 The `ACK` field is **two bit times long**, unlike CAN's one.
@@ -679,8 +693,27 @@ Data and remote frames are separated by the interframe space:
 | `INTERMISSION` | 3 | `111` |
 
 During `INTERMISSION` no node may start a transmission. A dominant bit observed
-during `INTERMISSION` is interpreted as the start of an overload frame (§6.6),
-not as `SOF`.
+during `INTERMISSION` is the first bit of one of three things, and the bit after
+it tells them apart:
+
+| Next bit | Meaning | Receiver |
+|---|---|---|
+| recessive, carrier present | `SYNC` of a frame whose transmitter's interframe space ended slightly ahead of this node's | MUST receive it as `SYNC` bit 0 |
+| dominant | an overload flag (§6.6) | waits out the flag and delimiter, then a new `INTERMISSION` |
+| no carrier | noise | MUST disregard it and resume the interframe space (§6.2) |
+
+Over air, bit clocks that are aligned to the same frame still differ by up to a
+propagation delay plus the residual after resynchronization, so the next
+transmitter's first `SYNC` bit can reach a node while that node is still sampling
+its own last `INTERMISSION` bit. This is CAN's rule that a dominant bit in the
+third bit of the interframe space is `SOF`, applied to the whole field because
+`SYNC` makes the three cases distinguishable. Treating that bit as an overload
+instead leaves the node out of step with the frame that follows, and it then
+transmits into that frame's `EOF`.
+
+A node with a frame pending that sees another node's `SYNC` begin this way
+receives that frame and contends again afterwards; it does not join arbitration
+late.
 
 An error-passive node that has just transmitted MUST additionally wait 8
 recessive bit times (**suspend transmission**) after `INTERMISSION` before
