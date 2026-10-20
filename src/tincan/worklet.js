@@ -55,6 +55,15 @@ class TinCanProcessor extends AudioWorkletProcessor {
       this.protocol.on(name, (detail) => this._post({ type: 'event', event: name, detail: serialize(detail) }));
     }
 
+    // Input gaps: runs of exact zeros, which no microphone produces but the
+    // browser inserts when the capture side falls behind (and which its track
+    // statistics do not count). Every later sample arrives that much late.
+    this.zeroRun = 0;
+    this.gaps = { count: 0, ms: 0 };
+    // Optional capture of the last `capture` seconds of input, for diagnosis.
+    this.capture = o.capture > 0 ? new Int16Array(Math.round(o.capture * sampleRate)) : null;
+    this.captureAt = 0;
+
     this.port.onmessage = (e) => this._onMessage(e.data);
     this.running = true;
     this.lastReport = 0;
@@ -97,6 +106,18 @@ class TinCanProcessor extends AudioWorkletProcessor {
       case 'stop':
         this.running = false;
         break;
+      case 'dump': {
+        // The capture in time order, ending now.
+        const c = this.capture;
+        const out = c ? new Int16Array(c.length) : new Int16Array(0);
+        if (c) {
+          const k = this.captureAt % c.length;
+          out.set(c.subarray(k), 0);
+          out.set(c.subarray(0, k), c.length - k);
+        }
+        this._post({ type: 'capture', samples: out, endTime: this.frames / sampleRate, filled: Math.min(this.captureAt, out.length) });
+        break;
+      }
       default:
         break;
     }
@@ -123,6 +144,21 @@ class TinCanProcessor extends AudioWorkletProcessor {
     if (this.bitLog.length > this.bitLogLimit) this.bitLog.shift();
   }
 
+  _watchInput(x, i) {
+    if (this.capture) {
+      this.capture[this.captureAt % this.capture.length] = Math.max(-32768, Math.min(32767, Math.round(x * 32767)));
+      this.captureAt++;
+    }
+    if (x === 0) { this.zeroRun++; return; }
+    if (this.zeroRun >= 64) {
+      const ms = (this.zeroRun / sampleRate) * 1000;
+      this.gaps.count++;
+      this.gaps.ms += ms;
+      this._post({ type: 'event', event: 'input-gap', detail: { ms, at: (this.frames + i) / sampleRate } });
+    }
+    this.zeroRun = 0;
+  }
+
   _post(m) { this.port.postMessage(m); }
 
   process(inputs, outputs) {
@@ -134,6 +170,7 @@ class TinCanProcessor extends AudioWorkletProcessor {
 
     for (let i = 0; i < n; i++) {
       const x = input ? input[i] : 0;
+      if (input) this._watchInput(x, i);
       const y = this.phy.processSample(x);
       if (output) output[i] = this.muted ? 0 : y;
     }
@@ -151,6 +188,7 @@ class TinCanProcessor extends AudioWorkletProcessor {
         queue: this.protocol.queueLength,
         transmitting: this.protocol.transmitting,
         stats: { ...this.protocol.stats },
+        inputGaps: { ...this.gaps },
         signal: {
           eR: this.phy.last.eR, eD: this.phy.last.eD,
           noise: this.phy.last.noise, ratio: this.phy.last.ratio,

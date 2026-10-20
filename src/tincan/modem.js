@@ -147,6 +147,7 @@ export class Modem extends EventTarget {
         kappa: this.opts.kappa,
         muted: this.muted,
         strict: this.opts.strict,
+        capture: this.opts.capture || 0,
       },
     });
 
@@ -268,6 +269,17 @@ export class Modem extends EventTarget {
     this.dispatchEvent(new CustomEvent('stop'));
   }
 
+  /**
+   * The input the node has heard over the last `opts.capture` seconds, as
+   * 16-bit samples ending now — for diagnosis, when started with `capture`.
+   */
+  dumpCapture() {
+    return new Promise((resolve) => {
+      const off = this.on('capture', (e) => { off(); resolve({ ...e.detail, sampleRate: this.ctx.sampleRate }); });
+      this.node.port.postMessage({ type: 'dump' });
+    });
+  }
+
   /** Queue a frame. Resolves when the worklet has accepted or rejected it. */
   send(frame) {
     if (!this.node) throw new Error('modem is not started');
@@ -319,6 +331,9 @@ export class Modem extends EventTarget {
       case 'accepted':
       case 'rejected':
         this.dispatchEvent(new CustomEvent(m.type, { detail: m }));
+        break;
+      case 'capture':
+        this.dispatchEvent(new CustomEvent('capture', { detail: m }));
         break;
       default:
         break;

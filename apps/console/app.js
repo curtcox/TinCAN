@@ -170,8 +170,12 @@ $('#start').addEventListener('click', async () => {
       amplitude: Number($('#amp').value) / 100,
       name: $('#callsign').value || 'node',
       deviceId: $('#mic').value || undefined,
+      // ?capture keeps the last two and a half minutes of input for diagnosis:
+      // window.tincanCapture() returns it.
+      capture: new URLSearchParams(location.search).has('capture') ? 150 : 0,
       ...thresholds(),
     });
+    window.tincanCapture = () => modem?.dumpCapture();
     wire(modem);
     await modem.start();
     fillMicrophones($('#mic'), $('#micadvice')).then(describePhy);     // now the browser will name them
@@ -371,6 +375,12 @@ function wire(m) {
 
   m.on('rejected', (e) => log.add(`frame rejected: ${escapeHtml(e.detail.error)}`, 'err'));
 
+  m.on('input-gap', (e) => {
+    diag.gapMs = (diag.gapMs ?? 0) + e.detail.ms;
+    log.add(`the browser inserted ${e.detail.ms.toFixed(0)} ms of silence into the microphone audio: `
+      + 'everything after it arrives that much later', 'warnrow');
+  });
+
   m.on('input-dropped', (e) => {
     diag.droppedMs = e.detail.totalMs;
     log.add(`the browser dropped ${e.detail.ms.toFixed(0)} ms of microphone audio: bits around now may be `
@@ -470,7 +480,7 @@ $('#report').addEventListener('click', () => {
     },
     audio: modem ? modem.diagnostics() : null,
     status: lastStatus && { ...lastStatus, bits: undefined },
-    diagnostics: { stalls: diag.stalls, overloads: diag.overloads, droppedMs: diag.droppedMs ?? 0, warned: [...diag.warned] },
+    diagnostics: { stalls: diag.stalls, overloads: diag.overloads, droppedMs: diag.droppedMs ?? 0, gapMs: diag.gapMs ?? 0, warned: [...diag.warned] },
     peers: [...peers].map(([address, a]) => ({ address, callsign: a.callsign, version: a.version })),
     events,
     bits: bitHistory,
