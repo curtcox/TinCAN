@@ -23,7 +23,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test 'test/*.test.mjs'",
+    "test": "node --test test/*.test.mjs",
     "build": "node tools/build-site.mjs",
     "serve": "node tools/build-site.mjs && python3 -m http.server 8080 --directory _site",
     "dev": "python3 -m http.server 8080"

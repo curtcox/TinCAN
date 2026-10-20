@@ -41,11 +41,13 @@ jobs:
 
       - name: Check the built site
         run: |
-          for f in _site/index.html _site/style.css _site/.nojekyll \
+          # .nojekyll is meant to be empty: it only has to exist.
+          test -f _site/.nojekyll || (echo "missing: _site/.nojekyll" && exit 1)
+          for f in _site/index.html _site/style.css \
                    _site/spec/tincan-1.0.html _site/spec/transport.html \
                    _site/spec/rationale.html _site/spec/vectors.html \
                    _site/apps/snooper/index.html _site/apps/console/index.html \
-                   _site/apps/simulator/index.html \
+                   _site/apps/simulator/index.html _site/apps/selftest/index.html \
                    _site/src/tincan/worklet.js _site/src/tincan/modem.js; do
             test -s "$f" || (echo "missing or empty: $f" && exit 1)
           done
