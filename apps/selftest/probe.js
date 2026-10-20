@@ -184,7 +184,7 @@ function profileTiming(fs) {
        * slow and a metre away: both devices' latency and the round trip must
        * pass before the window opens (spec §5.6).
        */
-      latencyLimit: ((t.sync + t.prop) * t.tq - 2 / SPEED_OF_SOUND) / 2,
+      latencyLimit: Math.max(0, ((t.sync + t.prop) * t.tq - 2 / SPEED_OF_SOUND) / 2),
     };
   });
 }

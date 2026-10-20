@@ -108,9 +108,12 @@ export class Modem extends EventTarget {
     this.ctx = new (window.AudioContext || window.webkitAudioContext)(CONTEXT_OPTIONS);
     if (this.ctx.state === 'suspended') await this.ctx.resume();
     // Some browsers fire statechange without the state changing; report changes only.
-    let lastState = this.ctx.state;
-    this.ctx.onstatechange = () => {
-      const state = this.ctx && this.ctx.state;
+    // Read the state from this context, not this.ctx, which stop() clears
+    // before the context reports that it has closed.
+    const ctx = this.ctx;
+    let lastState = ctx.state;
+    ctx.onstatechange = () => {
+      const state = ctx.state;
       if (state === lastState) return;
       lastState = state;
       this.dispatchEvent(new CustomEvent('audio-state', { detail: { state } }));

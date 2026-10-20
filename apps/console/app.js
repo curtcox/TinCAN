@@ -148,6 +148,9 @@ function setLive(live) {
 
 $('#start').addEventListener('click', async () => {
   $('#start').disabled = true;
+  // Warnings describe the last session; this one earns its own.
+  $('#warnings').replaceChildren();
+  diag.warned.clear();
   try {
     modem = new Modem({
       band: bandSel.value,

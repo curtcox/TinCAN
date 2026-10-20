@@ -213,7 +213,10 @@ test('the Modem reports audio-context state changes, and only real ones', async 
   modem.ctx.state = 'running';
   modem.ctx.onstatechange();
   assert.deepEqual(states, ['interrupted', 'running']);
+  const ctx = modem.ctx;
   await modem.stop();
+  ctx.onstatechange();                     // the context reports closing after stop() let go of it
+  assert.deepEqual(states, ['interrupted', 'running', 'closed']);
 });
 
 test('microphones that are probably wireless are recognised by name', () => {
