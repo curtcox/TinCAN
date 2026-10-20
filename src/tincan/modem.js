@@ -184,7 +184,7 @@ export class Modem extends EventTarget {
       this.warnings.push(
         `The microphone "${track.label}" looks like ${wireless}. Wireless microphones hear 100–200 ms `
         + 'late, far later than any TinCAN timing profile allows, so this node will misread its own bits. '
-        + 'Leave, choose this computer\'s built-in microphone, and join again.');
+        + 'Leave, choose this computer\'s built-in microphone (or a wired one, if it has none), and join again.');
     }
     if (this.warnings.length) {
       this.dispatchEvent(new CustomEvent('warning', { detail: { warnings: this.warnings } }));

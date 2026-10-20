@@ -39,11 +39,15 @@ export const SCHEDULE = {
   repeats: 2,
 };
 
+/**
+ * Longest speaker-to-microphone latency searched for. Far beyond anything a
+ * profile allows, so that a wireless microphone gets a figure rather than
+ * "not heard".
+ */
+export const MAX_LATENCY = 1.0;
 /** Seconds of signal, and how long to keep recording after it for latency. */
 export const SIGNAL_SECONDS = SCHEDULE.repeatEvery * SCHEDULE.repeats;
-export const RECORD_SECONDS = SIGNAL_SECONDS + 0.5;
-/** Longest speaker-to-microphone latency searched for. */
-const MAX_LATENCY = 0.4;
+export const RECORD_SECONDS = SIGNAL_SECONDS + MAX_LATENCY;
 
 function chirp(fs) {
   const n = Math.round(SCHEDULE.chirpLen * fs);
@@ -136,10 +140,16 @@ function median(a) {
 
 /**
  * Where the chirp sent at `sentAt` (seconds) arrives in `x`, searching up to
- * MAX_LATENCY later. Returns the delay in seconds and the normalised
+ * `maxDelay` later. Returns the delay in seconds and the normalised
  * correlation at the peak, or null when nothing chirp-like is there.
  */
 export function findChirp(x, fs, sentAt, maxDelay = MAX_LATENCY) {
+  const best = bestChirp(x, fs, sentAt, maxDelay);
+  return best.correlation >= 0.3 ? best : null;
+}
+
+/** The best match to the chirp, however weak. */
+function bestChirp(x, fs, sentAt, maxDelay) {
   const c = chirp(fs);
   let cc = 0;
   for (const v of c) cc += v * v;
@@ -155,7 +165,7 @@ export function findChirp(x, fs, sentAt, maxDelay = MAX_LATENCY) {
     const r = xx > 0 ? dot / Math.sqrt(xx * cc) : 0;
     if (r > best) { best = r; bestLag = lag; }
   }
-  return best >= 0.3 ? { delay: bestLag / fs, correlation: best } : null;
+  return { delay: bestLag / fs, correlation: Math.max(0, best) };
 }
 
 /** The detection window W and the sample-point offset, in samples, for each profile. */
@@ -251,15 +261,92 @@ function measureRepeat(x, fs, chirpAt, lag = 0) {
  */
 export function analyseSelf(rec, fs) {
   const reps = [];
+  let bestMatch = { delay: 0, correlation: 0 };
   for (let r = 0; r < SCHEDULE.repeats; r++) {
     const base = r * SCHEDULE.repeatEvery;
-    const found = findChirp(rec, fs, base + SCHEDULE.chirpAt);
-    if (!found) continue;
-    const burst = measureRepeat(rec, fs, base + SCHEDULE.chirpAt + found.delay, found.delay);
-    reps.push({ latency: found.delay, correlation: found.correlation, ...burst });
+    const best = bestChirp(rec, fs, base + SCHEDULE.chirpAt, MAX_LATENCY);
+    if (best.correlation > bestMatch.correlation) bestMatch = best;
+    if (best.correlation < 0.3) continue;
+    const burst = measureRepeat(rec, fs, base + SCHEDULE.chirpAt + best.delay, best.delay);
+    reps.push({ latency: best.delay, correlation: best.correlation, ...burst });
   }
-  if (!reps.length) return { heard: false, repeats: 0 };
-  return { heard: true, repeats: reps.length, ...combine(reps) };
+  const input = inputStats(rec, fs);
+  if (!reps.length) return { heard: false, repeats: 0, ...whyUnheard(rec, fs, input), bestMatch, input };
+  return { heard: true, repeats: reps.length, ...combine(reps), bestMatch, input };
+}
+
+const dbfs = (a) => (a > 0 ? Math.round(20 * Math.log10(a) * 10) / 10 : -Infinity);
+
+/**
+ * How loud the recording is: peak and RMS overall in dBFS, and the RMS of
+ * each tenth of a second, so a report shows whether anything arrived and when.
+ * A level of -Infinity (null in JSON) is digital silence.
+ */
+export function inputStats(rec, fs) {
+  let peak = 0, sum = 0;
+  for (const v of rec) { const a = Math.abs(v); if (a > peak) peak = a; sum += v * v; }
+  const step = Math.round(0.1 * fs);
+  const envelope = [];
+  for (let i = 0; i < rec.length; i += step) {
+    let e = 0;
+    const end = Math.min(rec.length, i + step);
+    for (let k = i; k < end; k++) e += rec[k] * rec[k];
+    envelope.push(dbfs(Math.sqrt(e / (end - i))));
+  }
+  return { peakDb: dbfs(peak), rmsDb: dbfs(Math.sqrt(sum / (rec.length || 1))), envelopeDb: envelope, envelopeStep: 0.1 };
+}
+
+/** Below this peak the microphone delivered nothing: no real microphone is this quiet. */
+const SILENT_DB = -90;
+
+/**
+ * Why the chirp was not found, as one of:
+ *   silent     the microphone delivered (near) digital silence
+ *   late       the test tone arrived, later than MAX_LATENCY
+ *   unmatched  the test tone arrived in time, but the chirp did not match
+ *   quiet      there is sound, but not the test tone
+ * with `toneDelay`, the delay of the first tone burst, when one was heard.
+ */
+function whyUnheard(rec, fs, input) {
+  if (!(input.peakDb > SILENT_DB)) return { why: 'silent' };
+  const w = Math.round(0.012 * fs);
+  const hop = Math.round(0.005 * fs);
+  const env = [];
+  for (let e = w; e <= rec.length; e += hop) env.push(toneAmplitude(rec, e, w, TONE_HZ, fs));
+  const sorted = [...env].sort((a, b) => a - b);
+  const threshold = Math.max((sorted[Math.floor(sorted.length * 0.2)] || 0) * 10, 1e-6);
+  const minRun = Math.round((0.6 * SCHEDULE.toneLen * fs) / hop);
+  for (let i = 0; i < env.length; i++) {
+    if (env[i] < threshold) continue;
+    let j = i;
+    while (j < env.length && env[j] >= threshold) j++;
+    if (j - i >= minRun) {
+      // The run starts at the f_D tone, give or take the window.
+      const toneDelay = (i * hop + w) / fs - SCHEDULE.toneAt;
+      return { why: toneDelay > MAX_LATENCY ? 'late' : 'unmatched', toneDelay };
+    }
+    i = j;
+  }
+  return { why: 'quiet' };
+}
+
+/**
+ * A mono recording as a 16-bit PCM WAV file, to open in an audio editor or
+ * send with a report.
+ */
+export function encodeWav(samples, fs) {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const text = (at, s) => { for (let i = 0; i < s.length; i++) v.setUint8(at + i, s.charCodeAt(i)); };
+  text(0, 'RIFF'); v.setUint32(4, 36 + samples.length * 2, true); text(8, 'WAVE');
+  text(12, 'fmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, fs, true); v.setUint32(28, fs * 2, true); v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+  text(36, 'data'); v.setUint32(40, samples.length * 2, true);
+  for (let i = 0; i < samples.length; i++) {
+    const c = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(44 + i * 2, Math.round(c * 32767), true);
+  }
+  return buf;
 }
 
 /**
@@ -302,8 +389,9 @@ export function analysePeer(rec, fs) {
     }
     i += burstHops;
   }
-  if (!reps.length) return { heard: false, repeats: 0 };
-  return { heard: true, repeats: reps.length, ...combine(reps) };
+  const input = inputStats(rec, fs);
+  if (!reps.length) return { heard: false, repeats: 0, input };
+  return { heard: true, repeats: reps.length, ...combine(reps), input };
 }
 
 /** Median of each figure across repeats. */
@@ -328,22 +416,53 @@ function combine(reps) {
 
 const db = (ratio) => 20 * Math.log10(ratio);
 
+/** Why this device did not hear its own test signal, in words. */
+function unheard(self) {
+  const level = self.input ? `${Number.isFinite(self.input.peakDb) ? self.input.peakDb.toFixed(0) : '−∞'} dBFS peak` : '';
+  const late = self.toneDelay !== undefined ? `${(self.toneDelay * 1000).toFixed(0)} ms` : '';
+  switch (self.why) {
+    case 'silent':
+      return 'the microphone delivered silence: nothing at all reached the page. A phone used as a microphone may be '
+        + 'locked, asleep or out of range; otherwise the system may be blocking this browser from the microphone.';
+    case 'late':
+      return `the test tones arrived about ${late} late, longer than the ${MAX_LATENCY * 1000} ms this check searches. `
+        + 'Only a wireless or heavily processed microphone is that slow.';
+    case 'unmatched':
+      return `the test tones arrived, about ${late} late, but the chirp that times them was not recognised `
+        + `(best match ${((self.bestMatch?.correlation || 0) * 100).toFixed(0)} %): the speaker or microphone may be `
+        + 'distorting it, or something else in the room was loud at the time.';
+    case 'quiet':
+      return `the microphone hears sound (${level}) but not the test signal: the speaker is muted, turned down or `
+        + 'playing somewhere else (headphones, a display, AirPlay), the microphone is too far from it, or echo '
+        + 'cancellation removed it.';
+    default:
+      return 'the test signal never reached the microphone: speaker muted or too quiet, or echo cancellation removed it.';
+  }
+}
+
 /**
  * What the measurements mean for each bit-timing profile. `peer` is optional:
  * without it the checks that need another device are reported as not run.
- * `microphone` is the capture device's label, when known.
+ * `microphone` is the capture device's label, when known, and `builtIn` the
+ * built-in microphone's label: null when the computer lists none.
  *
  * Each check is { name, ok: true|false|null, detail }; null means unknown.
  */
-export function assess(self, peer = null, { microphone = '' } = {}) {
+export function assess(self, peer = null, { microphone = '', builtIn } = {}) {
   const general = [];
+  // What to use instead of a microphone that will not do. `builtIn` is the
+  // built-in microphone's label, null when none is listed, undefined if unknown.
+  const instead = builtIn === null
+    ? 'This computer lists no built-in microphone (a Mac mini, Mac Studio or desktop PC usually has none): '
+      + 'use a wired one, USB or a headset in the audio jack, next to the speaker, and measure again.'
+    : `Use ${builtIn ? `"${builtIn}"` : 'the computer\'s built-in microphone'} and measure again.`;
   const wireless = wirelessMicReason(microphone);
   if (wireless) {
     general.push({
       name: 'microphone',
       ok: false,
       detail: `"${microphone}" looks like ${wireless}. Wireless microphones hear 100–200 ms late and are `
-        + 'seldom next to this computer\'s speaker. Choose the built-in microphone and measure again.',
+        + `seldom next to this computer's speaker. ${instead}`,
     });
   }
   general.push({
@@ -352,7 +471,7 @@ export function assess(self, peer = null, { microphone = '' } = {}) {
     detail: self.heard
       ? `own tone at ${db(self.profiles.T25.steady).toFixed(0)} dBFS, `
         + `${Math.min(99, db(self.profiles.T25.steady / self.profiles.T25.noise)).toFixed(0)} dB above the noise`
-      : 'the test signal never reached the microphone: speaker muted or too quiet, or echo cancellation removed it. A node that cannot hear itself cannot arbitrate or monitor its own bits.',
+      : `${unheard(self)} A node that cannot hear itself cannot arbitrate or monitor its own bits.`,
   });
 
   if (self.heard) {
@@ -367,7 +486,7 @@ export function assess(self, peer = null, { microphone = '' } = {}) {
         : `${ms.toFixed(1)} ms from speaker to microphone, longer than any profile allows (${slowest}, the most `
           + `tolerant, allows ${(most * 1000).toFixed(0)} ms), so no setting will work. Delays this long `
           + `usually mean a wireless microphone — an iPhone through Continuity, AirPods, a Bluetooth headset — `
-          + `or heavy audio processing. Use the computer's built-in microphone and measure again.`,
+          + `or heavy audio processing. ${instead}`,
     });
   }
 

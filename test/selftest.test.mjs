@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  buildProbeSignal, analyseSelf, analysePeer, assess, AMPLITUDE, RECORD_SECONDS,
+  buildProbeSignal, analyseSelf, analysePeer, assess, encodeWav, inputStats, AMPLITUDE, RECORD_SECONDS, SCHEDULE,
 } from '../apps/selftest/probe.js';
 import { mulberry32 } from '../src/tincan/bus.js';
 
@@ -20,7 +20,7 @@ const signal = buildProbeSignal(FS);
  * tail with `reverbLevel` times the energy of a unit-gain direct sound and the
  * given RT60, and white noise.
  */
-function record({ at = 0, seconds = RECORD_SECONDS, latencyMs = 0, gain = 1, rt60 = 0, reverbLevel = 0, noise = 0.0005, seed = 1 }) {
+function record({ src = signal, at = 0, seconds = RECORD_SECONDS, latencyMs = 0, gain = 1, rt60 = 0, reverbLevel = 0, noise = 0.0005, seed = 1 }) {
   const rnd = mulberry32(seed);
   const out = new Float32Array(Math.round(seconds * FS));
   const taps = [[0, gain]];
@@ -40,10 +40,10 @@ function record({ at = 0, seconds = RECORD_SECONDS, latencyMs = 0, gain = 1, rt6
   }
   const shift = Math.round((at + latencyMs / 1000) * FS);
   for (const [d, a] of taps) {
-    for (let i = 0; i < signal.length; i++) {
+    for (let i = 0; i < src.length; i++) {
       const k = i + shift + d;
       if (k >= out.length) break;
-      out[k] += a * signal[i];
+      out[k] += a * src[i];
     }
   }
   for (let i = 0; i < out.length; i++) out[i] += noise * (rnd() * 2 - 1);
@@ -169,4 +169,83 @@ test('a built-in microphone with a short delay raises neither warning', () => {
   const a = assess(analyseSelf(record({ latencyMs: 12, gain: 0.5 }), FS), null, { microphone: 'MacBook Pro Microphone' });
   assert.equal(general(a, 'latency').ok, true);
   assert.equal(general(a, 'microphone'), undefined);
+});
+
+test('a microphone that delivers nothing is told apart from one that hears no test signal', () => {
+  const silent = analyseSelf(record({ gain: 0, noise: 0 }), FS);
+  assert.equal(silent.heard, false);
+  assert.equal(silent.why, 'silent');
+  assert.equal(silent.input.peakDb, -Infinity);
+  assert.match(general(assess(silent), 'hears itself').detail, /delivered silence.*locked, asleep or out of range/);
+
+  const quiet = analyseSelf(record({ gain: 0 }), FS);
+  assert.equal(quiet.why, 'quiet');
+  assert.ok(quiet.input.peakDb > -70 && quiet.input.peakDb < -60, `noise peak ${quiet.input.peakDb} dBFS`);
+  assert.match(general(assess(quiet), 'hears itself').detail, /hears sound \(-6\d dBFS peak\) but not the test signal/);
+});
+
+test('a wireless microphone\'s long delay is still measured, up to a second', () => {
+  const self = analyseSelf(record({ latencyMs: 620, gain: 0.05 }), FS);
+  assert.ok(self.heard);
+  assert.equal(self.repeats, 2);
+  assert.ok(Math.abs(self.latency * 1000 - 620) < 0.5, `latency ${self.latency * 1000} ms`);
+  assert.equal(general(assess(self), 'latency').ok, false);
+});
+
+test('a delay past the search is reported as late, with an estimate, not as unheard', () => {
+  const self = analyseSelf(record({ latencyMs: 1300, gain: 0.05 }), FS);
+  assert.equal(self.heard, false);
+  assert.equal(self.why, 'late');
+  assert.ok(Math.abs(self.toneDelay - 1.3) < 0.03, `tone delay ${self.toneDelay} s`);
+  assert.match(general(assess(self), 'hears itself').detail, /arrived about 1\d{3} ms late, longer than the 1000 ms/);
+});
+
+test('tones that arrive without a recognisable chirp are reported as such', () => {
+  const src = Float32Array.from(signal);
+  for (let r = 0; r < SCHEDULE.repeats; r++) {
+    const c0 = Math.round((r * SCHEDULE.repeatEvery + SCHEDULE.chirpAt) * FS);
+    src.fill(0, c0, c0 + Math.round(SCHEDULE.chirpLen * FS));
+  }
+  const self = analyseSelf(record({ src, latencyMs: 40, gain: 0.3 }), FS);
+  assert.equal(self.heard, false);
+  assert.equal(self.why, 'unmatched');
+  assert.ok(Math.abs(self.toneDelay - 0.04) < 0.03, `tone delay ${self.toneDelay} s`);
+  assert.ok(self.bestMatch.correlation < 0.3);
+  assert.match(general(assess(self), 'hears itself').detail, /chirp that times them was not recognised/);
+});
+
+test('a heard recording reports its level over time and the strength of its match', () => {
+  const self = analyseSelf(record({ latencyMs: 12, gain: 0.5 }), FS);
+  assert.equal(self.input.envelopeDb.length, Math.ceil(RECORD_SECONDS * 10));
+  assert.ok(self.input.peakDb > -20 && self.input.peakDb < -16, `peak ${self.input.peakDb} dBFS`);
+  assert.ok(self.bestMatch.correlation > 0.9);
+  // The level rises while the tones play and falls back in the gaps.
+  assert.ok(self.input.envelopeDb[10] > self.input.envelopeDb[3] + 30);
+  assert.deepEqual(inputStats(new Float32Array(0), FS).envelopeDb, []);
+});
+
+test('the advice names the built-in microphone, or a wired one when there is none', () => {
+  const self = analyseSelf(record({ latencyMs: 168.7, gain: 0.01 }), FS);
+  const mic = '2024 iPhone 16 Microphone';
+  const named = assess(self, null, { microphone: mic, builtIn: 'MacBook Pro Microphone' });
+  assert.match(general(named, 'microphone').detail, /Use "MacBook Pro Microphone" and measure again/);
+  assert.match(general(named, 'latency').detail, /Use "MacBook Pro Microphone"/);
+
+  const none = assess(self, null, { microphone: mic, builtIn: null });
+  for (const name of ['microphone', 'latency']) {
+    assert.match(general(none, name).detail, /lists no built-in microphone.*use a wired one/);
+    assert.doesNotMatch(general(none, name).detail, /Use the computer's built-in/);
+  }
+});
+
+test('a recording downloads as a 16-bit mono WAV file', () => {
+  const wav = new DataView(encodeWav(Float32Array.from([0, 0.5, -1, 2]), FS));
+  const text = (at, n) => String.fromCharCode(...Array.from({ length: n }, (_, i) => wav.getUint8(at + i)));
+  assert.equal(text(0, 4), 'RIFF');
+  assert.equal(text(8, 4), 'WAVE');
+  assert.equal(wav.getUint16(22, true), 1, 'mono');
+  assert.equal(wav.getUint32(24, true), FS);
+  assert.equal(wav.getUint16(34, true), 16);
+  assert.equal(wav.getUint32(40, true), 8);
+  assert.deepEqual([0, 1, 2, 3].map((i) => wav.getInt16(44 + 2 * i, true)), [0, 16384, -32767, 32767]);
 });

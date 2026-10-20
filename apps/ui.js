@@ -314,7 +314,10 @@ function showMicAdvice(select, advice, mics) {
   const note = el('p', { class: 'note warn' },
     `"${label}" looks like ${reason}. Wireless microphones hear 100–200 ms late, several times more than `
     + 'any TinCAN timing profile allows, and are rarely next to this computer\'s speaker. '
-    + (builtIn ? '' : 'Choose this computer\'s built-in microphone, here or in the system sound settings.'));
+    + (builtIn ? '' : mics.filter((m) => m.deviceId !== 'default').length > 1
+      ? 'None of the others here looks built in. If one is, choose it; if this computer has none (a Mac mini, '
+        + 'Mac Studio or desktop PC usually doesn\'t), use a wired microphone, USB or a headset in the audio jack, next to the speaker.'
+      : 'It is the only microphone listed. Use a wired one, USB or a headset in the audio jack, next to the speaker.'));
   if (builtIn) {
     if (select.disabled) {
       note.append(`Stop, choose "${builtIn.label}", and start again.`);

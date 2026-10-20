@@ -7,12 +7,14 @@
  * It renders offline, so it is silent and faster than real time.
  */
 
-import { Modem, CAPTURE_CONSTRAINTS } from '../../src/tincan/modem.js';
+import {
+  Modem, CAPTURE_CONSTRAINTS, listMicrophones, wirelessMicReason, builtInMicrophone,
+} from '../../src/tincan/modem.js';
 import { Session } from '../../src/tincan/transport.js';
 import { formatFrame } from '../../src/tincan/frame.js';
 import { $, el, LogView, topbar, escapeHtml, download, fillMicrophones, reportHeader, reportName } from '../ui.js';
 import {
-  buildProbeSignal, analyseSelf, analysePeer, assess, RECORD_SECONDS, TONE_HZ,
+  buildProbeSignal, analyseSelf, analysePeer, assess, encodeWav, RECORD_SECONDS, TONE_HZ,
 } from './probe.js';
 
 $('#chrome').replaceWith(topbar('Self-test'));
@@ -162,6 +164,8 @@ const PROBE_URL = new URL('./probe-worklet.js', import.meta.url);
 const LISTEN_SECONDS = 15;
 let ownResult = null;
 let peerResult = null;
+/** The last recording, for "Download recording". */
+let lastRecording = null;
 const verdicts = new LogView($('#verdicts'), { limit: 100 });
 
 function setMicState(text, kind = '') {
@@ -184,6 +188,16 @@ async function capture(signal, seconds) {
     const track = stream.getAudioTracks()[0];
     const settings = track?.getSettings?.() || {};
     results.input = { label: track?.label || '', settings };
+    // Every microphone on offer, to tell "chose a wireless one" from "had no other".
+    const mics = await listMicrophones().catch(() => []);
+    const builtIn = builtInMicrophone(mics);
+    results.microphones = mics.map((m) => ({
+      label: m.label,
+      used: m.deviceId === settings.deviceId || undefined,
+      builtIn: m === builtIn || undefined,
+      wireless: !!wirelessMicReason(m.label) || undefined,
+    }));
+    results.builtIn = builtIn ? builtIn.label : null;
     const ignored = ['echoCancellation', 'noiseSuppression', 'autoGainControl'].filter((k) => settings[k] === true);
     $('#micwarnings').replaceChildren(...ignored.map((k) => el('p', { class: 'note warn' },
       `${k} is still on: this browser ignored the request to turn it off, so these figures `
@@ -200,11 +214,18 @@ async function capture(signal, seconds) {
     const recording = new Promise((resolve) => { probe.port.onmessage = (e) => resolve(e.data.recording); });
     ctx.createMediaStreamSource(stream).connect(probe);
     probe.connect(ctx.destination);
-    return { recording: await recording, fs, reported: (ctx.outputLatency || ctx.baseLatency || 0) + (settings.latency || 0) };
+    const rec = await recording;
+    lastRecording = { samples: rec, fs, kind: signal ? 'measure' : 'listen' };
+    $('#recording').disabled = false;
+    return { recording: rec, fs, reported: (ctx.outputLatency || ctx.baseLatency || 0) + (settings.latency || 0) };
   } finally {
     for (const t of stream.getTracks()) t.stop();
     ctx.close();
   }
+}
+
+function assessOptions() {
+  return { microphone: results.input?.label || '', builtIn: results.builtIn };
 }
 
 const mark = (ok) => (ok === true ? '✓' : ok === false ? '✗' : '–');
@@ -212,7 +233,7 @@ const mark = (ok) => (ok === true ? '✓' : ok === false ? '✗' : '–');
 function render() {
   verdicts.clear();
   if (!ownResult) return;
-  const a = assess(ownResult, peerResult, { microphone: results.input?.label || '' });
+  const a = assess(ownResult, peerResult, assessOptions());
   for (const c of a.general) {
     verdicts.add(`${mark(c.ok)} <b>${escapeHtml(c.name)}</b> — ${escapeHtml(c.detail)}`, c.ok === false ? 'err' : '');
   }
@@ -240,12 +261,14 @@ $('#measure').addEventListener('click', async () => {
     results.self = ownResult;
     results.fs = fs;
     results.reportedLatency = reported;
-    setMicState(ownResult.heard ? 'measured' : 'heard nothing', ownResult.heard ? 'ok' : 'bad');
+    const unheard = { silent: 'microphone silent', late: 'heard, too late', unmatched: 'signal not recognised' };
+    setMicState(ownResult.heard ? 'measured' : unheard[ownResult.why] || 'heard nothing', ownResult.heard ? 'ok' : 'bad');
     $('#micsummary').textContent = ownResult.heard
       ? `Speaker-to-microphone latency ${(ownResult.latency * 1000).toFixed(1)} ms`
         + (reported > 0 ? ` (the browser reports ${(reported * 1000).toFixed(1)} ms)` : '')
         + ` at ${fs} Hz, from ${results.input?.label || 'the default microphone'}.`
-      : 'This device did not hear its own test signal.';
+      : `This device did not hear its own test signal through ${results.input?.label || 'the default microphone'}; `
+        + 'see below for why. Download the recording to look at what it did hear.';
     render();
   } catch (err) {
     setMicState('failed', 'bad');
@@ -263,6 +286,7 @@ $('#listen').addEventListener('click', async () => {
   try {
     const { recording, fs } = await capture(null, LISTEN_SECONDS);
     const peer = analysePeer(recording, fs);
+    results.listen = { heard: peer.heard, repeats: peer.repeats, input: peer.input };
     if (peer.heard) {
       peerResult = peer;
       results.peer = peer;
@@ -293,8 +317,16 @@ $('#report').addEventListener('click', () => {
     reportedLatency: results.reportedLatency ?? null,
     self: results.self,
     peer: results.peer,
-    assessment: ownResult ? assess(ownResult, peerResult, { microphone: results.input?.label || '' }) : null,
+    microphones: results.microphones ?? null,
+    lastListen: results.listen ?? null,
+    assessment: ownResult ? assess(ownResult, peerResult, assessOptions()) : null,
   };
   download(reportName('selftest', 'json'),
     JSON.stringify(report, null, 1), 'application/json');
+});
+
+$('#recording').addEventListener('click', () => {
+  if (!lastRecording) return;
+  const { samples, fs, kind } = lastRecording;
+  download(reportName(`${kind}-recording`, 'wav'), encodeWav(samples, fs), 'audio/wav');
 });
