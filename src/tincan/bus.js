@@ -104,6 +104,8 @@ export class AcousticChannel {
    *   all of its own.
    * @param {number} [opts.selfGain] how loudly a node hears itself
    * @param {() => number} [opts.random] uniform [0,1) source, for repeatability
+   * @param {number} [opts.shiftHeadroomMs] room to delay any node's input by
+   *   this much more with `shiftInput`
    */
   constructor(opts) {
     this.sampleRate = opts.sampleRate || 16000;
@@ -185,8 +187,9 @@ export class AcousticChannel {
     const maxTap = this.reverbTaps.reduce((m, [d]) => Math.max(m, d), 0);
     this.reverbState = new Float64Array(N);
 
+    const headroom = Math.round(((opts.shiftHeadroomMs ?? 0) / 1000) * this.sampleRate);
     this.histLen = 1;
-    while (this.histLen < Math.max(maxDelay, maxTap) + 2) this.histLen <<= 1;
+    while (this.histLen < Math.max(maxDelay + headroom, maxTap) + 2) this.histLen <<= 1;
     this.histMask = this.histLen - 1;
     for (const n of this.nodes) n.history = new Float32Array(this.histLen);
 
@@ -195,6 +198,21 @@ export class AcousticChannel {
   }
 
   node(name) { return this.nodes.find((n) => n.spec.name === name); }
+
+  /**
+   * From now on, node `name` hears everything `ms` later (positive: the
+   * browser filled a gap with silence) or earlier (negative: it discarded
+   * input it had no room for). Its own transmissions are unaffected.
+   */
+  shiftInput(name, ms) {
+    const i = this.nodes.findIndex((n) => n.spec.name === name);
+    const by = Math.round((ms / 1000) * this.sampleRate);
+    for (let j = 0; j < this.nodes.length; j++) {
+      const d = this.delay[i][j] + by;
+      if (d < 1 || d > this.histLen - 2) throw new Error(`cannot shift ${name}'s input by ${ms} ms`);
+      this.delay[i][j] = d;
+    }
+  }
   get protocols() { return this.nodes.map((n) => n.protocol); }
 
   /** Advance the simulation by one sample. */

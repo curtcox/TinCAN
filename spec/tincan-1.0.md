@@ -521,6 +521,21 @@ A node MUST NOT resynchronize on an edge it produced itself while it is the only
 transmitter, and MUST NOT resynchronize during the `SYNC` field (§5.4 governs
 there instead).
 
+**Input continuity.** Resynchronization assumes the signal moves against the
+bit clock by a few time quanta at a time. An implementation whose audio input
+loses samples breaks that assumption: everything after the loss arrives early,
+an early edge before the sample point is taken for a late one and corrected
+the wrong way, and a loss longer than about `PHASE_SEG1 + PHASE_SEG2` puts the
+sample point in the next bit outright. In the reference simulation a `T2`
+receiver survives its input arriving 80 ms early mid-frame and loses the frame
+at 150 ms; it survives input arriving 300 ms late, which `PROP_SEG` absorbs.
+Implementations MUST NOT discard input samples to keep their latency down,
+SHOULD prefer audio buffers large enough never to underrun over the last few
+milliseconds of latency, and SHOULD report any loss they can detect. A browser
+node using the smallest buffers its `AudioContext` offered lost about 2 ms of
+microphone input per second under load, uncounted by the capture track's
+statistics; one with the next size up lost none.
+
 ### 5.6 Range limit
 
 `PROP_SEG` must cover the round trip, because a node that transmits recessive

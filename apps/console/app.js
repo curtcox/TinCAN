@@ -381,6 +381,12 @@ function wire(m) {
       + 'everything after it arrives that much later', 'warnrow');
   });
 
+  m.on('input-lost', (e) => {
+    diag.lostMs = e.detail.totalMs;
+    log.add(`the audio thread fell ${e.detail.ms.toFixed(0)} ms behind, and the microphone audio in that time `
+      + 'was lost: everything after it arrives that much early, and a frame in flight may fail', 'warnrow');
+  });
+
   m.on('input-dropped', (e) => {
     diag.droppedMs = e.detail.totalMs;
     log.add(`the browser dropped ${e.detail.ms.toFixed(0)} ms of microphone audio: bits around now may be `
@@ -480,7 +486,7 @@ $('#report').addEventListener('click', () => {
     },
     audio: modem ? modem.diagnostics() : null,
     status: lastStatus && { ...lastStatus, bits: undefined },
-    diagnostics: { stalls: diag.stalls, overloads: diag.overloads, droppedMs: diag.droppedMs ?? 0, gapMs: diag.gapMs ?? 0, warned: [...diag.warned] },
+    diagnostics: { stalls: diag.stalls, overloads: diag.overloads, droppedMs: diag.droppedMs ?? 0, gapMs: diag.gapMs ?? 0, lostMs: diag.lostMs ?? 0, warned: [...diag.warned] },
     peers: [...peers].map(([address, a]) => ({ address, callsign: a.callsign, version: a.version })),
     events,
     bits: bitHistory,

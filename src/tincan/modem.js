@@ -24,12 +24,15 @@ export const CAPTURE_CONSTRAINTS = {
 };
 
 /**
- * The AudioContext options for a node. `latencyHint: 0` asks for the smallest
- * buffers the browser will give. On a MacBook Pro in Chrome that measured
- * 60–63 ms from speaker to microphone, against 64–72 ms for 'interactive',
- * and every millisecond counts against PROP_SEG (spec §5.5).
+ * The AudioContext options for a node. 'interactive' rather than the smallest
+ * buffers (`latencyHint: 0`), which save about 5 ms of latency but cost
+ * microphone audio: on a MacBook Pro in Chrome, a node at `0` fell 60 ms
+ * behind real time in 30 s and the browser discarded 51 ms of input it had no
+ * room for, while 'interactive' lost nothing. Every lost stretch makes all
+ * later edges arrive early, and one longer than PHASE_SEG2 moves the sample
+ * point into the next bit (spec §5.5); at T2 that misread a frame in two.
  */
-export const CONTEXT_OPTIONS = { latencyHint: 0 };
+export const CONTEXT_OPTIONS = { latencyHint: 'interactive' };
 
 /**
  * getUserMedia audio constraints for the microphone `deviceId`, or for the
@@ -157,6 +160,7 @@ export class Modem extends EventTarget {
 
     this.ready = true;
     this.lastStatusAt = Date.now();
+    this.clock = { wall: performance.now(), audio: this.ctx.currentTime ?? 0, behindMs: 0, reportedMs: 0 };
     this.watchdog = setInterval(() => this._watch(), 1000);
     this.watchdog.unref?.();
     this.dispatchEvent(new CustomEvent('start', { detail: { sampleRate: this.ctx.sampleRate } }));
@@ -189,8 +193,26 @@ export class Modem extends EventTarget {
     }
   }
 
+  /**
+   * How far the audio thread has fallen behind real time. Rendering that
+   * falls behind cannot take the microphone audio that arrived meanwhile, and
+   * the browser discards it, uncounted by the track's statistics.
+   */
+  _checkBehind(wall = performance.now(), audio = this.ctx?.currentTime) {
+    if (!this.clock || audio === undefined || this.ctx?.state !== 'running') return;
+    const behind = (wall - this.clock.wall) - (audio - this.clock.audio) * 1000;
+    this.clock.behindMs = Math.max(this.clock.behindMs, behind);
+    // Quantum-sized jitter is not loss; report each further 10 ms.
+    if (this.clock.behindMs - this.clock.reportedMs >= 10) {
+      const ms = this.clock.behindMs - this.clock.reportedMs;
+      this.clock.reportedMs = this.clock.behindMs;
+      this.dispatchEvent(new CustomEvent('input-lost', { detail: { ms, totalMs: this.clock.behindMs } }));
+    }
+  }
+
   _watch(now = Date.now()) {
     this._checkDropped();
+    this._checkBehind();
     const quiet = now - this.lastStatusAt > 2000;
     if (quiet && !this.stalled) {
       this.stalled = true;
@@ -224,6 +246,7 @@ export class Modem extends EventTarget {
         settings: track.getSettings ? track.getSettings() : {},
         latencyMs: this._inputStats()?.latency ?? null,
         droppedMs: this.droppedInputMs ?? null,
+        lostMs: this.clock ? this.clock.reportedMs : null,
       } : null,
       stalled: this.stalled,
       warnings: [...this.warnings],

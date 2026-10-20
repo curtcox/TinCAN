@@ -1,7 +1,7 @@
 /** Small shared helpers for the TinCAN apps. No framework. */
 
 import { DETECTOR_DEFAULTS } from '../src/tincan/params.js';
-import { listMicrophones, wirelessMicReason, builtInMicrophone } from '../src/tincan/modem.js';
+import { listMicrophones, wirelessMicReason, builtInMicrophone, CONTEXT_OPTIONS } from '../src/tincan/modem.js';
 import { BUILD, describeBuild } from '../version.js';
 
 export const $ = (sel, root = document) => root.querySelector(sel);
@@ -145,15 +145,22 @@ const LATENCY_KEY = 'tincan.latency';
 export function saveMeasuredLatency(label, seconds) {
   try {
     const all = JSON.parse(localStorage.getItem(LATENCY_KEY) || '{}');
-    all[micName(label)] = { ms: Math.round(seconds * 10000) / 10, at: new Date().toISOString(), build: BUILD.commit };
+    all[micName(label)] = {
+      ms: Math.round(seconds * 10000) / 10, at: new Date().toISOString(), build: BUILD.commit,
+      latencyHint: CONTEXT_OPTIONS.latencyHint,
+    };
     localStorage.setItem(LATENCY_KEY, JSON.stringify(all));
   } catch { /* not remembered */ }
 }
 
-/** The latency measured through `label`, as { ms, at, build }, or null if never measured. */
+/**
+ * The latency measured through `label`, as { ms, at, build }, or null if never
+ * measured, or measured with other audio buffers than a node now uses.
+ */
 export function measuredLatency(label) {
   try {
-    return JSON.parse(localStorage.getItem(LATENCY_KEY) || '{}')[micName(label)] || null;
+    const m = JSON.parse(localStorage.getItem(LATENCY_KEY) || '{}')[micName(label)];
+    return m && m.latencyHint === CONTEXT_OPTIONS.latencyHint ? m : null;
   } catch { return null; }
 }
 

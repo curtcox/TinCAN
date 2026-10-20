@@ -595,3 +595,44 @@ test('a slow audio path is steered to the fastest profile whose PROP_SEG covers 
   // A Bluetooth headset's 250 ms: nothing.
   assert.equal(fastestProfileFor(250), null);
 });
+
+/*
+ * Lost and inserted input. Browsers fill a capture underrun with silence, so
+ * everything after it arrives late, and discard input their audio thread had
+ * no room for, so everything after it arrives early. At T2 a receiver has
+ * PROP_SEG, 380 ms, to absorb lateness, but early arrival soon walks its
+ * 60 ms detection window past PHASE_SEG2, 40 ms, into the next bit.
+ */
+function shiftedReception(ms) {
+  const ch = channel({
+    profile: 'T2', deviceLatencyMs: 60, selfDelayMs: 0.5, shiftHeadroomMs: 800,
+    nodes: [
+      { name: 'a', x: 0, y: 0 },
+      { name: 'c', x: 0.5, y: 0.3 },                    // acknowledges
+      { name: 'b', x: 1, y: 0, mode: 'listener' },      // hears it all `ms` sooner or later
+    ],
+  });
+  const [a, , b] = ch.protocols;
+  const got = collect(b, 'frame');
+  ch.shiftInput('b', 300);              // room to arrive early later; harmless before the frame
+  a.send({ id: 0x323, data: [0x10, 0x68, 0x61, 0x64, 0x61] });
+  ch.run(20);                           // mid-frame
+  ch.shiftInput('b', ms);
+  ch.run(80);
+  return { got, b };
+}
+
+test('at T2 a receiver rides out input that arrives late, even by a fifth of a second', () => {
+  for (const ms of [13, 100, 200]) {
+    const { got, b } = shiftedReception(ms);
+    assert.equal(got.length, 1, `${ms} ms late: delivered`);
+    assert.equal(b.stats.formErrors + b.stats.stuffErrors + b.stats.crcErrors, 0, `${ms} ms late`);
+  }
+});
+
+test('at T2 a receiver loses the frame when its input arrives a tenth of a second early', () => {
+  assert.equal(shiftedReception(-80).got.length, 1, '80 ms early: the window still covers the bit');
+  const { got, b } = shiftedReception(-150);
+  assert.equal(got.length, 0, '150 ms early: the sample point reads the next bit');
+  assert.ok(b.stats.formErrors + b.stats.stuffErrors + b.stats.crcErrors > 0);
+});

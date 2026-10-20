@@ -83,7 +83,8 @@ test('Modem.start asks for raw capture and wires microphone → worklet → spea
   // Chrome lists the system default as 'default', and gives the site's last
   // choice instead unless asked for it by name.
   assert.deepEqual(calls.constraints, { audio: { ...CAPTURE_CONSTRAINTS, deviceId: { exact: 'default' } } });
-  assert.deepEqual(calls.contextOptions, { latencyHint: 0 }, 'the smallest audio buffers the browser offers');
+  assert.deepEqual(calls.contextOptions, { latencyHint: 'interactive' },
+    'not the smallest buffers, which lose microphone audio under load');
   assert.deepEqual(CAPTURE_CONSTRAINTS,
     { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
     'every capture stage that would alter the signal is off');
@@ -294,5 +295,25 @@ test('the Modem takes input latency from the track\'s statistics, and reports dr
   modem._watch();
   assert.deepEqual(drops, [{ ms: 120, totalMs: 120 }]);
   assert.equal(modem.diagnostics().input.droppedMs, 120);
+  await modem.stop();
+});
+
+test('the Modem reports when its audio thread falls behind and microphone audio is lost', async () => {
+  fakeBrowser();
+  const modem = new Modem({ profile: 'T2' });
+  await modem.start();
+  modem.ctx.state = 'running';
+  modem.clock = { wall: 0, audio: 0, behindMs: 0, reportedMs: 0 };
+  const lost = [];
+  modem.on('input-lost', (e) => lost.push(e.detail));
+  modem._checkBehind(1000, 0.995);
+  assert.deepEqual(lost, [], 'a few milliseconds is render-quantum jitter');
+  // The figures of a node at latencyHint 0: 60 ms behind in 30 s.
+  modem._checkBehind(30000, 29.94);
+  assert.equal(lost.length, 1);
+  assert.ok(Math.abs(lost[0].ms - 60) < 1e-6 && Math.abs(lost[0].totalMs - 60) < 1e-6, JSON.stringify(lost));
+  modem._checkBehind(31000, 30.94);
+  assert.equal(lost.length, 1, 'no further loss, no further report');
+  assert.ok(Math.abs(modem.diagnostics().input.lostMs - 60) < 1e-6);
   await modem.stop();
 });
