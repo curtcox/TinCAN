@@ -25,12 +25,12 @@ export const CAPTURE_CONSTRAINTS = {
 
 /**
  * The AudioContext options for a node. 'interactive' rather than the smallest
- * buffers (`latencyHint: 0`), which save about 5 ms of latency but cost
- * microphone audio: on a MacBook Pro in Chrome, a node at `0` fell 60 ms
- * behind real time in 30 s and the browser discarded 51 ms of input it had no
- * room for, while 'interactive' lost nothing. Every lost stretch makes all
- * later edges arrive early, and one longer than PHASE_SEG2 moves the sample
- * point into the next bit (spec §5.5); at T2 that misread a frame in two.
+ * buffers (`latencyHint: 0`), which save about 5 ms of latency but leave the
+ * audio thread less slack: on a MacBook Pro in Chrome, in a busy page, a node
+ * at `0` fell 60 ms behind real time in 30 s and the browser discarded the
+ * microphone input it had no room for; 'interactive' lost less, though not
+ * always nothing. Every lost stretch makes all later edges arrive early, and
+ * enough of it moves the sample point into the next bit (spec §5.5).
  */
 export const CONTEXT_OPTIONS = { latencyHint: 'interactive' };
 
