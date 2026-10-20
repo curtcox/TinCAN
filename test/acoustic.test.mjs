@@ -411,3 +411,74 @@ test('frames cross a lightly reverberant room, critical distance about 3 m', () 
     assert.equal(a.stats.framesSent, 1, `${profile}: acknowledged`);
   }
 });
+
+/*
+ * Silent loss. CAN's promise is that a frame its sender counts as delivered
+ * was received by every node, because any node that missed it destroys it
+ * with an error flag before EOF ends. Over air that promise depends on the
+ * sender hearing other nodes over its own tone, and on the ACK slot holding
+ * nothing but acknowledgements. The tests below are real laptop and room
+ * conditions in which it does not hold today.
+ */
+
+test('a node alone in a reverberant room is not acknowledged by its own echo',
+  { todo: 'the transmitter falls silent for ACK (§6.7), and the reverberant tail of its own last dominant bits reads as an acknowledgement, so it reports frames delivered to nobody' },
+  () => {
+    // An ordinary office: RT60 0.4 s, critical distance 1 m.
+    const ch = channel({
+      nodes: [{ name: 'a' }],
+      rt60: 0.4, reverbLevel: 1, reverbSeed: 2, seed: 2,
+      selfGain: 10, selfDelayMs: 20,
+    });
+    const [a] = ch.protocols;
+    ch.run(0.5);
+    for (let k = 0; k < 3; k++) a.send({ id: 0x100 + k, data: [k, 0x5a] });
+    ch.run(ch.bitTime * 400);
+
+    assert.equal(a.stats.framesSent, 0, 'nothing can have been delivered: there is nobody to deliver to');
+    assert.ok(a.stats.ackErrors > 0);
+  });
+
+test('with laptop self-gain and latency, a frame its sender counts as delivered was received',
+  { todo: 'the receiver\'s own ACK, heard 25 ms late, spills into the ACK delimiter and it flags a form error; the sender, hearing itself 10× louder, never hears that error flag (§4.6) and completes' },
+  () => {
+    const ch = channel({
+      nodes: [{ name: 'a', x: 0 }, { name: 'b', x: 0.6 }],
+      selfGain: 10, selfDelayMs: 25,
+    });
+    const [a, b] = ch.protocols;
+    const got = collect(b, 'frame');
+    ch.run(0.5);
+    a.send({ id: 0x123, data: [1, 2, 3, 4] });
+    ch.run(ch.bitTime * 300);
+
+    assert.equal(a.stats.framesSent, 1);
+    assert.equal(got.length, a.stats.framesSent, 'b received every frame a counted as delivered');
+  });
+
+test('two laptops a metre apart in an ordinary office exchange frames',
+  { todo: 'the reverberant tail of each dominant bit reads as dominant in the recessive bit after it at theta_D = 0.12 (§4.7), and the failures are mostly silent: see the two tests above' },
+  () => {
+    // RT60 0.4 s and a 1 m critical distance are typical of a small office or
+    // living room; each laptop hears itself 10× louder than the other, 25 ms late.
+    for (const profile of ['T25', 'T10']) {
+      const ch = channel({
+        profile, seed: 2, reverbSeed: 2,
+        nodes: [{ name: 'a', x: 0 }, { name: 'b', x: 1 }],
+        rt60: 0.4, reverbLevel: 1, selfGain: 10, selfDelayMs: 25,
+      });
+      const [a, b] = ch.protocols;
+      const atA = collect(a, 'frame');
+      const atB = collect(b, 'frame');
+      ch.run(0.5);
+      a.send({ id: 0x123, data: [1, 2, 3, 4] });
+      ch.run(ch.bitTime * 200);
+      b.send({ id: 0x124, data: [5, 6, 7, 8] });
+      ch.run(ch.bitTime * 200);
+
+      assert.equal(atB.length, 1, `${profile}: b heard a`);
+      assert.equal(atA.length, 1, `${profile}: a heard b`);
+      assert.equal(a.stats.framesSent, 1, `${profile}: a was acknowledged`);
+      assert.equal(b.stats.framesSent, 1, `${profile}: b was acknowledged`);
+    }
+  });
