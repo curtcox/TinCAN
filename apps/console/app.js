@@ -63,8 +63,8 @@ function describePhy() {
     const faster = timing(best).bitRate / t.bitRate;
     range = `Through ${escapeHtml(name)} this device hears itself ${m.ms.toFixed(1)} ms late (measured `
       + `${m.at.slice(0, 10)}), so arbitration is good to about ${maxRange(profSel.value, m.slopMs).toFixed(1)} m.`
-      + (faster > 1 ? ` ${best} would be ${faster.toFixed(faster < 2 ? 2 : 0)}× faster, good to `
-        + `${maxRange(best, m.slopMs).toFixed(1)} m, if every node on the bus can use it too.` : '');
+      + (faster > 1 ? ` ${best} would be ${faster.toFixed(faster < 10 ? 1 : 0)}× faster, good to `
+        + `${maxRange(best, measuredSlop(name, best).slopMs).toFixed(1)} m, if every node on the bus can use it too.` : '');
   } else {
     const best = fastestProfileFor(m.slopMs);
     range = `<b>Through ${escapeHtml(name)} this device hears itself ${m.ms.toFixed(1)} ms late (measured `
@@ -84,7 +84,9 @@ profSel.addEventListener('change', describePhy);
 $('#mic').addEventListener('change', describePhy);
 describePhy();
 
-fillMicrophones($('#mic'), $('#micadvice')).then(describePhy);
+// Runs after this module has finished loading, so the side-link note, which
+// needs the whole page, can be refreshed with the microphone's measurement.
+fillMicrophones($('#mic'), $('#micadvice')).then(() => { describePhy(); describeLink(); });
 
 $('#amp').addEventListener('input', (e) => {
   const v = Number(e.target.value) / 100;
@@ -658,6 +660,7 @@ function describeLink() {
   const main = timing(profSel.value);
   const slop = mySlop(profile);
   const notes = [`${(t.bitRate / main.bitRate).toFixed(t.bitRate >= main.bitRate ? 1 : 2)}× the main bus's speed.`];
+  if (slop !== null) notes.push(`Good to about ${maxRange(profile, slop).toFixed(1)} m between two devices as slow as this one.`);
   if (!bandsCompatible(bandSel.value, profSel.value, band, profile)) {
     notes.push(`<b>Bands ${bandSel.value} and ${band} cannot share a device at these profiles</b> (Part 2 §8.2): `
       + 'use T10 or slower on both, or another band.');
@@ -681,7 +684,7 @@ function fillLinkPeers() {
   if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
 }
 
-for (const s of ['#linkband', '#linkprofile']) $(s).addEventListener('change', describeLink);
+for (const s of ['#linkband', '#linkprofile', '#mic']) $(s).addEventListener('change', describeLink);
 bandSel.addEventListener('change', fillLinkChoices);
 profSel.addEventListener('change', describeLink);
 fillLinkChoices();
