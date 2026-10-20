@@ -207,8 +207,10 @@ function render() {
     verdicts.add(`${mark(c.ok)} <b>${escapeHtml(c.name)}</b> — ${escapeHtml(c.detail)}`, c.ok === false ? 'err' : '');
   }
   if (a.rt60 !== null) verdicts.add(`– <b>room</b> — reverberation time about ${a.rt60.toFixed(2)} s at ${TONE_HZ} Hz`);
+  // A failure above applies to every profile.
+  const generalBad = a.general.filter((c) => c.ok === false).length;
   for (const p of a.profiles) {
-    const bad = p.checks.filter((c) => c.ok === false).length;
+    const bad = p.checks.filter((c) => c.ok === false).length + generalBad;
     const unknown = p.checks.filter((c) => c.ok === null).length;
     verdicts.add(`<b>${p.profile}</b> — ${bad ? `${bad} problem${bad > 1 ? 's' : ''}` : unknown ? 'no problems yet' : 'should work'}`,
       bad ? 'err' : '');
@@ -227,8 +229,9 @@ $('#measure').addEventListener('click', async () => {
     ownResult = analyseSelf(recording, fs);
     setMicState(ownResult.heard ? 'measured' : 'heard nothing', ownResult.heard ? 'ok' : 'bad');
     $('#micsummary').textContent = ownResult.heard
-      ? `Speaker-to-microphone latency ${(ownResult.latency * 1000).toFixed(1)} ms `
-        + `(the browser reports ${(reported * 1000).toFixed(1)} ms) at ${fs} Hz.`
+      ? `Speaker-to-microphone latency ${(ownResult.latency * 1000).toFixed(1)} ms`
+        + (reported > 0 ? ` (the browser reports ${(reported * 1000).toFixed(1)} ms)` : '')
+        + ` at ${fs} Hz.`
       : 'This device did not hear its own test signal.';
     render();
   } catch (err) {
