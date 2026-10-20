@@ -197,3 +197,28 @@ test('binary payloads that are not valid UTF-8 are surfaced as bytes', () => {
   assert.equal(got[0].text, null, 'not decoded as text');
   assert.deepEqual(Array.from(got[0].data), Array.from(bytes));
 });
+
+test('two nodes that picked the same address still get their announcements through',
+  { todo: 'identical identifiers both win arbitration and collide in the data field forever; nothing detects or resolves the duplicate address' },
+  () => {
+    // The Console picks an address at random from 1–30, so two Consoles share
+    // one about once in thirty tries. Part 2 §1.1 relies on SOURCE being unique.
+    const pa = new Protocol({ name: 'a' });
+    const pb = new Protocol({ name: 'b' });
+    const bus = new IdealBus([pa, pb]);
+    const a = new Session(pa, { address: 9, callsign: 'ada' });
+    const b = new Session(pb, { address: 9, callsign: 'bob' });
+
+    const atA = [];
+    const atB = [];
+    a.on('presence', (p) => atA.push(p));
+    b.on('presence', (p) => atB.push(p));
+
+    bus.run(12);
+    a.announce();
+    b.announce();
+    bus.run(20000);
+
+    assert.equal(atB.length, 1, 'b heard a');
+    assert.equal(atA.length, 1, 'a heard b');
+  });

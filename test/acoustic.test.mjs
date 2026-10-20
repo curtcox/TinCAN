@@ -301,3 +301,100 @@ test('the T100 bench profile works at close range', () => {
   assert.equal(got.length, 1, 'a 100 bit/s frame arrived');
   assert.deepEqual(Array.from(got[0].frame.data), [0xf0, 0x0f]);
 });
+
+/*
+ * The self path. Every test above leaves `selfGain` at 1 and `selfDelayMs` at
+ * about 1 ms: a node hears itself exactly as loudly as a peer one metre away,
+ * and instantly. Real devices are nothing like that. A laptop's speaker sits a
+ * few centimetres from its own microphone, so it is 10–30× louder at that
+ * microphone than a peer across a table, and a browser's output-to-input round
+ * trip is typically 20–60 ms. The tests below pin down where the
+ * implementation stops working; those marked `todo` describe real two-device
+ * conditions that fail today.
+ */
+
+function pair(opts = {}) {
+  const ch = channel({ nodes: [{ name: 'a', x: 0, y: 0 }, { name: 'b', x: 1, y: 0 }], ...opts });
+  const [a, b] = ch.protocols;
+  return { ch, a, b, got: collect(b, 'frame') };
+}
+
+test('an acknowledgement is heard when the transmitter hears itself twice as loud as its peer', () => {
+  const { ch, a, got } = pair({ selfGain: 2 });
+  a.send({ id: 0x123, data: [1, 2, 3, 4] });
+  ch.run(8);
+
+  assert.equal(got.length, 1);
+  assert.equal(a.stats.framesSent, 1);
+  assert.equal(a.stats.ackErrors, 0);
+});
+
+test('an acknowledgement is heard when the transmitter hears itself 10× louder than its peer',
+  { todo: 'the transmitter\'s own recessive tone during ACK buries the peer\'s dominant tone (§4.6 margin applied to the self path)' },
+  () => {
+    // Laptop geometry: own speaker a few centimetres away, peer one metre away.
+    const { ch, a, got } = pair({ selfGain: 10 });
+    a.send({ id: 0x123, data: [1, 2, 3, 4] });
+    ch.run(8);
+
+    assert.equal(a.stats.ackErrors, 0, 'the peer\'s acknowledgement was heard');
+    assert.equal(a.stats.framesSent, 1);
+    assert.equal(got.length, 1);
+  });
+
+test('arbitration resolves when every node hears itself 10× louder than its peers',
+  { todo: 'each contender\'s own recessive tone buries the other\'s dominant bit, so neither withdraws' },
+  () => {
+    const ch = channel({
+      selfGain: 10,
+      nodes: [
+        { name: 'primer', x: 0.4, y: -0.3 },
+        { name: 'lo', x: 0, y: 0 },
+        { name: 'hi', x: 0.8, y: 0 },
+      ],
+    });
+    const [primer, lo, hi] = ch.protocols;
+
+    contend(ch, primer, () => {
+      lo.send({ id: 0x201, data: [1] });
+      hi.send({ id: 0x205, data: [2] });
+    });
+    ch.run(14);
+
+    assert.equal(hi.stats.arbitrationsLost, 1, 'the higher identifier withdrew');
+    assert.equal(lo.stats.arbitrationsLost, 0);
+    assert.equal(lo.stats.framesSent, 1);
+    assert.equal(hi.stats.framesSent, 1);
+  });
+
+test('T25 tolerates 25 ms of speaker-to-microphone latency', () => {
+  const { ch, a, got } = pair({ selfDelayMs: 25 });
+  a.send({ id: 0x123, data: [1, 2, 3, 4] });
+  ch.run(8);
+
+  assert.equal(got.length, 1);
+  assert.equal(a.stats.framesSent, 1);
+  assert.equal(a.stats.bitErrors, 0);
+});
+
+test('T25 tolerates 45 ms of speaker-to-microphone latency, a typical browser round trip',
+  { todo: 'the transmitter reads its own bits late and reports a bit error on every frame; loopback latency is not measured or compensated' },
+  () => {
+    const { ch, a, got } = pair({ selfDelayMs: 45 });
+    a.send({ id: 0x123, data: [1, 2, 3, 4] });
+    ch.run(8);
+
+    assert.equal(a.stats.bitErrors, 0, 'the transmitter read its own bits back correctly');
+    assert.equal(a.stats.framesSent, 1);
+    assert.equal(got.length, 1);
+  });
+
+test('T10 tolerates 45 ms of speaker-to-microphone latency', () => {
+  const { ch, a, got } = pair({ profile: 'T10', selfDelayMs: 45 });
+  a.send({ id: 0x123, data: [1, 2, 3, 4] });
+  ch.run(20);
+
+  assert.equal(got.length, 1);
+  assert.equal(a.stats.framesSent, 1);
+  assert.equal(a.stats.bitErrors, 0);
+});
