@@ -11,9 +11,13 @@ class TinCanProbe extends AudioWorkletProcessor {
     this.signal = o.signal;
     this.recording = new Float32Array(o.recordSamples);
     this.n = 0;
+    this.done = false;
   }
 
   process(inputs, outputs) {
+    // Returning false does not stop the calls while the microphone is still
+    // connected, and the recording has already been handed over.
+    if (this.done) return false;
     const input = inputs[0] && inputs[0][0];
     const output = outputs[0] && outputs[0][0];
     const len = output ? output.length : 128;
@@ -24,6 +28,7 @@ class TinCanProbe extends AudioWorkletProcessor {
     }
     this.n += len;
     if (this.n >= this.recording.length) {
+      this.done = true;
       this.port.postMessage({ recording: this.recording }, [this.recording.buffer]);
       return false;
     }

@@ -52,27 +52,6 @@ describePhy();
 
 fillMicrophones($('#mic'));
 
-/* Detector thresholds (spec §4.4.2), adjustable for diagnosis. */
-const thetaIn = $('#theta');
-const kappaIn = $('#kappa');
-const thresholds = () => ({ thetaD: Number(thetaIn.value) / 100, kappa: Number(kappaIn.value) });
-function showThresholds() {
-  const { thetaD, kappa } = thresholds();
-  $('#thetaval').textContent = `${thetaD.toFixed(2)}${thetaD === DETECTOR_DEFAULTS.thetaD ? ' (default)' : ''}`;
-  $('#kappaval').textContent = `${kappa} (${(10 * Math.log10(kappa)).toFixed(1)} dB)`
-    + `${kappa === DETECTOR_DEFAULTS.kappa ? ' (default)' : ''}`;
-  if (modem) modem.setThresholds({ thetaD, kappa });
-}
-function resetThresholds() {
-  thetaIn.value = String(Math.round(DETECTOR_DEFAULTS.thetaD * 100));
-  kappaIn.value = String(DETECTOR_DEFAULTS.kappa);
-  showThresholds();
-}
-thetaIn.addEventListener('input', showThresholds);
-kappaIn.addEventListener('input', showThresholds);
-$('#detreset').addEventListener('click', resetThresholds);
-resetThresholds();
-
 $('#amp').addEventListener('input', (e) => {
   const v = Number(e.target.value) / 100;
   $('#ampval').textContent = `${e.target.value}%`;
@@ -102,6 +81,27 @@ const events = [];
 const EVENT_HISTORY = 1000;
 const diag = { stalls: 0, overloads: 0, carrierRun: 0, deafBits: 0, warned: new Set() };
 let lastStatus = null;
+
+/* Detector thresholds (spec §4.4.2), adjustable for diagnosis. */
+const thetaIn = $('#theta');
+const kappaIn = $('#kappa');
+const thresholds = () => ({ thetaD: Number(thetaIn.value) / 100, kappa: Number(kappaIn.value) });
+function showThresholds() {
+  const { thetaD, kappa } = thresholds();
+  $('#thetaval').textContent = `${thetaD.toFixed(2)}${thetaD === DETECTOR_DEFAULTS.thetaD ? ' (default)' : ''}`;
+  $('#kappaval').textContent = `${kappa} (${(10 * Math.log10(kappa)).toFixed(1)} dB)`
+    + `${kappa === DETECTOR_DEFAULTS.kappa ? ' (default)' : ''}`;
+  if (modem) modem.setThresholds({ thetaD, kappa });
+}
+function resetThresholds() {
+  thetaIn.value = String(Math.round(DETECTOR_DEFAULTS.thetaD * 100));
+  kappaIn.value = String(DETECTOR_DEFAULTS.kappa);
+  showThresholds();
+}
+thetaIn.addEventListener('input', showThresholds);
+kappaIn.addEventListener('input', showThresholds);
+$('#detreset').addEventListener('click', resetThresholds);
+resetThresholds();
 
 const log = new LogView($('#log'), { limit: 500 });
 const chat = new LogView($('#chat'), { limit: 200 });
