@@ -2,6 +2,7 @@
 
 import { DETECTOR_DEFAULTS } from '../src/tincan/params.js';
 import { listMicrophones, wirelessMicReason, builtInMicrophone } from '../src/tincan/modem.js';
+import { BUILD, describeBuild } from '../version.js';
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -101,7 +102,46 @@ export function topbar(current) {
   return el('header', { class: 'topbar' },
     el('a', { class: 'brand', href: '../../', html: 'Tin<span>CAN</span>' }),
     el('nav', {}, links.map(([href, label]) =>
-      el('a', { href, 'aria-current': label === current ? 'page' : null }, label))));
+      el('a', { href, 'aria-current': label === current ? 'page' : null }, label))),
+    versionBadge());
+}
+
+/**
+ * Which build this page was loaded from, and whether it is still the one
+ * deployed. Pages caches files for ten minutes, so a page can be older than
+ * the site; the deployed version.json is fetched past the cache to tell.
+ */
+function versionBadge() {
+  const v = describeBuild(BUILD);
+  const badge = el('a', { class: 'version', href: v.url, title: v.title }, v.text);
+  if (BUILD.commit) {
+    fetch(new URL('../version.json', import.meta.url), { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((live) => {
+        if (!live?.commit || live.commit === BUILD.commit) return;
+        badge.classList.add('stale');
+        badge.textContent = `${v.short} — out of date: ${live.short} is deployed. Hold Shift and reload.`;
+        badge.title = `${v.title}; deployed now: ${describeBuild(live).title}`;
+      })
+      .catch(() => {});
+  }
+  return badge;
+}
+
+/** What every downloaded report starts with, so it says which build made it. */
+export function reportHeader() {
+  return {
+    generated: new Date().toISOString(),
+    build: { ...BUILD, short: describeBuild(BUILD).short },
+    page: location.href,
+    userAgent: navigator.userAgent,
+  };
+}
+
+/** `tincan-console-28bdab2-2026-10-20T19-05-28-163Z.json` */
+export function reportName(kind, ext) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  return `tincan-${kind}-${describeBuild(BUILD).short}-${stamp}.${ext}`;
 }
 
 export function escapeHtml(s) {

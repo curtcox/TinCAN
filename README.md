@@ -104,6 +104,15 @@ generated test-vector page:
 npm run build
 ```
 
+Every page shows, at the right of its top bar, the commit it was built from and
+when it was deployed, and says so if a newer build has been deployed since the
+page loaded. Every report the apps download records the same. To ask the live
+site directly:
+
+```bash
+curl -s https://curtcox.github.io/TinCAN/version.json
+```
+
 To run the tests:
 
 ```bash

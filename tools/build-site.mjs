@@ -13,14 +13,48 @@
 
 import { mkdir, readFile, writeFile, cp, rm, readdir } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
 
 import { render, toc, escapeHtml } from './md.mjs';
 import { buildVectors } from './gen-vectors.mjs';
+import { describeBuild } from '../version.js';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, '_site');
+
+/**
+ * The commit being built and when. In GitHub Actions the commit is the one the
+ * workflow checked out; locally it is HEAD, marked dirty if the tree has
+ * changes. The time is when this build ran, which for the Pages workflow is
+ * about a minute before the deployment goes live.
+ */
+function buildInfo() {
+  const env = process.env;
+  const git = (...args) => {
+    try { return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim(); }
+    catch { return null; }
+  };
+  const commit = env.GITHUB_SHA || git('rev-parse', 'HEAD');
+  const committed = commit && git('show', '-s', '--format=%cI', commit);
+  return {
+    commit,
+    committedAt: committed ? new Date(committed).toISOString() : null,
+    deployedAt: new Date().toISOString(),
+    dirty: !env.GITHUB_ACTIONS && !!git('status', '--porcelain'),
+    run: env.GITHUB_RUN_ID ? `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/actions/runs/${env.GITHUB_RUN_ID}` : null,
+  };
+}
+
+const BUILD = buildInfo();
+
+/** The badge at the right of every page's top bar. */
+function versionBadge() {
+  const v = describeBuild(BUILD);
+  const href = v.url ? ` href="${escapeHtml(v.url)}"` : '';
+  return `<a class="version"${href} title="${escapeHtml(v.title)}">${escapeHtml(v.text)}</a>`;
+}
 
 const NAV = [
   ['spec/tincan-1.0.html', 'Part 1'],
@@ -60,6 +94,7 @@ function layout({ title, description, body, nav, depth }) {
       ${links}
       <a href="https://github.com/curtcox/TinCAN">GitHub</a>
   </nav>
+  ${versionBadge()}
 </header>
 <main class="wrap">
 <article class="prose">
@@ -98,11 +133,23 @@ async function main() {
   await mkdir(join(out, 'spec'), { recursive: true });
 
   // Static assets, copied so that the published paths match the repository's.
-  await cp(join(root, 'index.html'), join(out, 'index.html'));
+  const index = await readFile(join(root, 'index.html'), 'utf8');
+  if (!index.includes('<!-- version -->')) throw new Error('index.html has lost its <!-- version --> marker');
+  await writeFile(join(out, 'index.html'), index.replace('<!-- version -->', versionBadge()));
   await cp(join(root, 'style.css'), join(out, 'style.css'));
   await cp(join(root, 'apps'), join(out, 'apps'), { recursive: true });
   await cp(join(root, 'src'), join(out, 'src'), { recursive: true });
   await writeFile(join(out, '.nojekyll'), '');
+
+  // Which build this is: a module the pages import, and the same values as
+  // JSON for anything that only wants to ask what is deployed.
+  const versionJs = await readFile(join(root, 'version.js'), 'utf8');
+  const stamped = versionJs.replace(/export const BUILD = \{[^}]*\};/,
+    `export const BUILD = ${JSON.stringify(BUILD, null, 2)};`);
+  if (stamped === versionJs) throw new Error('version.js: could not find the BUILD object to stamp');
+  await writeFile(join(out, 'version.js'), stamped);
+  await writeFile(join(out, 'version.json'), JSON.stringify({ ...BUILD, short: describeBuild(BUILD).short }, null, 2) + '\n');
+  console.log(`  stamped ${describeBuild(BUILD).text}`);
 
   const produced = new Set();
   const rendered = [];

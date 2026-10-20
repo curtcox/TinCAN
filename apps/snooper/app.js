@@ -9,7 +9,7 @@ import { Modem, checkSupport } from '../../src/tincan/modem.js';
 import { BANDS, PROFILES, timing, maxRange } from '../../src/tincan/params.js';
 import { describeId, describePci, TOPIC, parseBaseId } from '../../src/tincan/transport.js';
 import {
-  $, el, hex, hexBytes, asciiBytes, LogView, topbar, escapeHtml, download, db,
+  $, el, hex, hexBytes, asciiBytes, LogView, topbar, escapeHtml, download, db, reportHeader, reportName,
   drawBits as drawBitStrip, drawMeter as drawLevels, fillMicrophones,
 } from '../ui.js';
 
@@ -270,8 +270,9 @@ $('#export').addEventListener('click', () => {
     crc: r.crc,
     wireBits: r.bits,
   }));
-  download(`tincan-${new Date().toISOString().replace(/[:.]/g, '-')}.jsonl`,
-    lines.join('\n') + '\n', 'application/x-ndjson');
+  // The first line says which build captured the rest.
+  lines.unshift(JSON.stringify({ capture: reportHeader() }));
+  download(reportName('snooper', 'jsonl'), lines.join('\n') + '\n', 'application/x-ndjson');
 });
 
 /* ---------------------------------------------------------------- */

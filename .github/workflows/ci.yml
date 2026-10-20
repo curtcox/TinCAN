@@ -51,4 +51,10 @@ jobs:
                    _site/src/tincan/worklet.js _site/src/tincan/modem.js; do
             test -s "$f" || (echo "missing or empty: $f" && exit 1)
           done
+          # Every page and report names the commit it was built from.
+          node -e "const v=require('./_site/version.json');
+            if (v.commit !== process.env.GITHUB_SHA) { console.error('version.json names', v.commit, 'not', process.env.GITHUB_SHA); process.exit(1); }"
+          grep -q "$GITHUB_SHA" _site/version.js || (echo "version.js not stamped" && exit 1)
+          grep -q 'class="version"' _site/index.html || (echo "home page has no version" && exit 1)
+          grep -q 'class="version"' _site/spec/tincan-1.0.html || (echo "spec page has no version" && exit 1)
           echo "site contains $(find _site -type f | wc -l) files"

@@ -10,7 +10,7 @@
 import { Modem, CAPTURE_CONSTRAINTS } from '../../src/tincan/modem.js';
 import { Session } from '../../src/tincan/transport.js';
 import { formatFrame } from '../../src/tincan/frame.js';
-import { $, el, LogView, topbar, escapeHtml, download, fillMicrophones } from '../ui.js';
+import { $, el, LogView, topbar, escapeHtml, download, fillMicrophones, reportHeader, reportName } from '../ui.js';
 import {
   buildProbeSignal, analyseSelf, analysePeer, assess, RECORD_SECONDS, TONE_HZ,
 } from './probe.js';
@@ -284,9 +284,7 @@ fillMicrophones($('#mic'), $('#micadvice'));
 
 $('#report').addEventListener('click', () => {
   const report = {
-    generated: new Date().toISOString(),
-    page: location.href,
-    userAgent: navigator.userAgent,
+    ...reportHeader(),
     secureContext: window.isSecureContext,
     audioWorklet: typeof AudioWorkletNode !== 'undefined',
     selfTest: results.checks,
@@ -297,6 +295,6 @@ $('#report').addEventListener('click', () => {
     peer: results.peer,
     assessment: ownResult ? assess(ownResult, peerResult, { microphone: results.input?.label || '' }) : null,
   };
-  download(`tincan-selftest-${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
+  download(reportName('selftest', 'json'),
     JSON.stringify(report, null, 1), 'application/json');
 });

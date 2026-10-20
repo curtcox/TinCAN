@@ -9,7 +9,7 @@ import {
   Session, baseId, describeId, PRIO, TOPIC, segment,
 } from '../../src/tincan/transport.js';
 import {
-  $, el, hex, hexBytes, parseHexBytes, parseId, db, download,
+  $, el, hex, hexBytes, parseHexBytes, parseId, db, download, reportHeader, reportName,
   LogView, topbar, escapeHtml, drawBits, drawMeter, fillMicrophones,
 } from '../ui.js';
 
@@ -382,9 +382,7 @@ drawMeter($('#meter'), {});
 
 $('#report').addEventListener('click', () => {
   const report = {
-    generated: new Date().toISOString(),
-    page: location.href,
-    userAgent: navigator.userAgent,
+    ...reportHeader(),
     secureContext: window.isSecureContext,
     config: {
       callsign: $('#callsign').value,
@@ -402,7 +400,7 @@ $('#report').addEventListener('click', () => {
     events,
     bits: bitHistory,
   };
-  download(`tincan-console-${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
+  download(reportName('console', 'json'),
     JSON.stringify(report, null, 1), 'application/json');
 });
 

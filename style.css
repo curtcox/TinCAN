@@ -319,3 +319,15 @@ footer.site a { color: var(--dim); }
 .card .kicker { font-family: var(--mono); font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent); display: block; margin-bottom: 0.4rem; }
 
 .frame-diagram { font-family: var(--mono); font-size: 0.7rem; overflow-x: auto; }
+
+/* Which build the page came from, at the right of the top bar. */
+.topbar .version {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--faint);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.topbar a.version[href]:hover { color: var(--accent); }
+.topbar .version.stale { color: var(--warn); white-space: normal; }
