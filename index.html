@@ -21,6 +21,7 @@
     <a href="./apps/console/">Console</a>
     <a href="./apps/simulator/">Simulator</a>
     <a href="./apps/selftest/">Self-test</a>
+    <a href="./apps/bands/">Bands</a>
     <a href="https://github.com/curtcox/TinCAN">GitHub</a>
   </nav>
   <!-- version -->
@@ -69,6 +70,12 @@
       <h3>Self-test</h3>
       <p>Check this browser can run a node, then measure the room: latency,
          echo, and how loudly each device hears itself and the other.</p>
+    </a>
+    <a class="card" href="./apps/bands/">
+      <span class="kicker">Reference</span>
+      <h3>Bands</h3>
+      <p>How the four bands compare: how loud each seems and to whom, how far
+         it carries, how much it can carry. Hear and measure them here.</p>
     </a>
   </div>
 
@@ -134,11 +141,11 @@
       <tbody>
         <tr><td><code>T100</code></td><td>100 bit/s</td><td>1.2 s</td><td>~0.2 m</td><td>bench, cable, loopback</td></tr>
         <tr><td><code>T50</code></td><td>50 bit/s</td><td>2.5 s</td><td>~0.3 m</td><td>two devices on a desk</td></tr>
-        <tr><td><code>T25</code> <span class="pill">default</span></td><td>25 bit/s</td><td>4.9 s</td><td>~2.4 m</td><td>a room</td></tr>
+        <tr><td><code>T25</code> <span class="pill">spec default</span></td><td>25 bit/s</td><td>4.9 s</td><td>~2.4 m</td><td>a room</td></tr>
         <tr><td><code>T10</code></td><td>10 bit/s</td><td>12.3 s</td><td>~6.9 m</td><td>a hall, or a reverberant one</td></tr>
         <tr><td><code>T5</code></td><td>5 bit/s</td><td>24.6 s</td><td>~3.4 m</td><td>devices with a slow audio path, such as laptops' built-in speakers and microphones</td></tr>
         <tr><td><code>T4</code></td><td>4 bit/s</td><td>30.8 s</td><td>~12 m</td><td>the same, further apart</td></tr>
-        <tr><td><code>T2</code></td><td>2 bit/s</td><td>61.5 s</td><td>~45 m</td><td>the same, across a hall</td></tr>
+        <tr><td><code>T2</code> <span class="pill">Console default</span></td><td>2 bit/s</td><td>61.5 s</td><td>~45 m</td><td>the same, across a hall</td></tr>
       </tbody>
     </table>
     </div>

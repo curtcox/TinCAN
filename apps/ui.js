@@ -98,6 +98,7 @@ export function topbar(current) {
     ['../console/', 'Console'],
     ['../simulator/', 'Simulator'],
     ['../selftest/', 'Self-test'],
+    ['../bands/', 'Bands'],
   ];
   return el('header', { class: 'topbar' },
     el('a', { class: 'brand', href: '../../', html: 'Tin<span>CAN</span>' }),

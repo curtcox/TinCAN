@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinCAN Bands</title>
+<meta name="description" content="How TinCAN's four bands compare: how loud each seems and to whom, how far it carries, and how much data it can carry.">
+<link rel="stylesheet" href="../../style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🥫</text></svg>">
+</head>
+<body>
+<div id="chrome"></div>
+
+<main class="wrap">
+  <h1 style="margin:0 0 .2rem;font-size:1.6rem;letter-spacing:-.02em">Bands</h1>
+  <p style="margin:0 0 1.5rem;color:var(--dim)">
+    Every TinCAN band is two tones, recessive and dominant, 1250 Hz apart, with a guard tone either
+    side to measure the noise (<a href="../../spec/tincan-1.0.html#42-band-plans">Part 1 §4.2</a>). The band decides
+    who can hear the bus, how far it carries and what it competes with. It does not decide how fast the
+    bus runs: the bit-timing profile does, and every band runs every profile at the same rate.
+  </p>
+
+  <div class="panel">
+    <h2>How loud each band seems</h2>
+    <p class="note" style="margin-top:0">For a tone reaching the listener at <b id="refspl"></b> dB SPL, about the
+      level of conversation across a table. Loudness is the ISO 226 loudness level of the band's louder tone,
+      in phon: equal phon sound equally loud. ISO 226 stops at 12.5 kHz, so for band B the table reports
+      who can hear it at all instead.</p>
+    <div class="table-scroll"><table id="loudness"></table></div>
+    <div class="row" style="margin-top:.6rem">
+      <label class="row tight" style="font-size:.85rem;color:var(--dim)">Level at the listener
+        <input id="spl" type="range" min="30" max="80" value="60" style="width:10rem"></label>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="margin-bottom:.6rem">
+      <h2 style="margin:0">Hear them on this device</h2>
+      <span class="spacer"></span>
+      <span id="playstate" class="pill">silent</span>
+    </div>
+    <p class="note" style="margin-top:0">Each button plays two seconds of a band's tones, alternating bit by
+      bit at T25 speed, at the Console's transmit level. They are the same digital level; what reaches you
+      also depends on the speaker. Turn the volume down first.</p>
+    <div class="row" id="play"></div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="margin-bottom:.6rem">
+      <h2 style="margin:0">Measure them on this device</h2>
+      <span class="spacer"></span>
+      <span id="measurestate" class="pill">not run</span>
+    </div>
+    <p class="note" style="margin-top:0">Plays each band's two tones in turn, about six seconds in all, and
+      records what this device's own microphone hears: whether its speaker and microphone can carry the band
+      at all, and how far above the room's noise. A band its own microphone barely hears will not carry far.</p>
+    <div class="row">
+      <button id="measure" class="primary">Measure the bands</button>
+    </div>
+    <div class="table-scroll"><table id="measured"></table></div>
+  </div>
+
+  <div class="panel">
+    <h2>How far each band carries</h2>
+    <p class="note" style="margin-top:0">Air absorbs high frequencies faster (ISO 9613-1, 20 °C, 50 %
+      relative humidity), on top of the 6 dB lost each time the distance doubles, which is the same for
+      every band. Furnishings, people and small speakers' narrow beams favour low frequencies further.</p>
+    <div class="table-scroll"><table id="carry"></table></div>
+  </div>
+
+  <div class="panel">
+    <h2>How much each band can carry</h2>
+    <p class="note" style="margin-top:0">A profile sets the bit rate, the same on every band. The bit time has
+      to cover every node's audio delay and the distance between them, because each bit is arbitrated
+      (<a href="../../spec/tincan-1.0.html#56-range-limit">Part 1 §5.6</a>), so TinCAN uses a sliver of
+      what each band's slot could carry. What a band adds is a channel of its own: two nodes that can do
+      better than the main bus can open a side link on another band
+      (<a href="../../spec/transport.html#8-side-links">Part 2 §8</a>).</p>
+    <div class="table-scroll"><table id="rates"></table></div>
+    <div class="table-scroll"><table id="capacity"></table></div>
+  </div>
+
+  <p class="note">Sources: ISO 226:2003 equal-loudness contours and hearing thresholds (tables as in
+    PyDSM's <code>pydsm.iso226</code>); hearing above 16 kHz from M. Wang et al., "Extended high-frequency
+    audiometry in healthy adults with different age groups", <i>J Otolaryngol Head Neck Surg</i> 50:52
+    (2021), 162 adults; A-weighting from IEC 61672-1; air absorption from ISO 9613-1. The figures are
+    computed in <code>apps/bands/acoustics.js</code> and checked against the standards in the test suite.</p>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>
