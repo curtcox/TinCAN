@@ -49,6 +49,9 @@ function loadScenario() {
   profSel.value = s.profile || 'T25';
   $('#noise').value = String(Math.round((s.noise ?? 0.0005) * 2000));
   $('#rt60').value = String(Math.round((s.rt60 ?? 0) * 100));
+  $('#rc').value = '18';
+  $('#selfgain').value = '1';
+  $('#selflat').value = '1';
   $('#duration').value = String(s.duration ?? 20);
   syncLabels();
   renderNodes(s);
@@ -62,6 +65,9 @@ function syncLabels() {
   $('#rtval').textContent = Number($('#rt60').value) === 0
     ? 'off' : `${(Number($('#rt60').value) / 100).toFixed(2)} s`;
   $('#durval').textContent = `${$('#duration').value} s`;
+  $('#rcval').textContent = `${(Number($('#rc').value) / 10).toFixed(1)} m`;
+  $('#sgval').textContent = `${$('#selfgain').value}× (${(20 * Math.log10(Number($('#selfgain').value))).toFixed(1)} dB)`;
+  $('#slval').textContent = `${$('#selflat').value} ms`;
   const p = profSel.value;
   $('#roomnote').innerHTML =
     `${Math.round(timing(p).bitRate)} bit/s, bit time ${(timing(p).bitTime * 1000).toFixed(0)} ms. `
@@ -70,7 +76,7 @@ function syncLabels() {
     + `Circles are drawn at the arbitration radius around each node.`;
 }
 
-for (const id of ['#noise', '#rt60', '#duration']) {
+for (const id of ['#noise', '#rt60', '#rc', '#selfgain', '#selflat', '#duration']) {
   $(id).addEventListener('input', () => { syncLabels(); drawRoom(SCENARIOS[scenarioSel.value]); });
 }
 profSel.addEventListener('change', () => { syncLabels(); drawRoom(SCENARIOS[scenarioSel.value]); });
@@ -124,6 +130,10 @@ async function run() {
     profile: profSel.value,
     noise: Number($('#noise').value) / 2000,
     rt60: Number($('#rt60').value) / 100,
+    // reverberant energy relative to the direct sound at 1 m: 1/rc² (bus.js)
+    reverbLevel: 1 / (Number($('#rc').value) / 10) ** 2,
+    selfGain: Number($('#selfgain').value),
+    selfDelayMs: Number($('#selflat').value),
     nodes: specs,
     random: mulberry32(Number($('#seed').value) || 1),
   });

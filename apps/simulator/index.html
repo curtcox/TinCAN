@@ -44,6 +44,14 @@
           <input id="noise" type="range" min="0" max="120" value="5"></label>
         <label class="field"><span>Reverberation RT60 <b id="rtval"></b></span>
           <input id="rt60" type="range" min="0" max="150" value="0"></label>
+        <label class="field" title="the distance at which a node's echo is as loud as its direct sound; small in small, hard rooms"><span>Critical distance <b id="rcval"></b></span>
+          <input id="rc" type="range" min="3" max="50" value="18"></label>
+        <label class="field" title="how much louder each node hears itself than a peer one metre away"><span>Self-gain <b id="sgval"></b></span>
+          <input id="selfgain" type="range" min="1" max="30" value="1"></label>
+        <label class="field" title="how late each node hears its own transmission"><span>Speaker-to-mic latency <b id="slval"></b></span>
+          <input id="selflat" type="range" min="1" max="80" value="1"></label>
+        <p class="note">To replay a real room, use the figures the
+          <a href="../selftest/">self-test's microphone check</a> measures.</p>
         <label class="field"><span>Duration <b id="durval"></b></span>
           <input id="duration" type="range" min="4" max="60" value="20"></label>
         <label class="field"><span>Random seed</span>
