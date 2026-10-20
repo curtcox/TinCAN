@@ -4,11 +4,12 @@
 
 import { Modem, checkSupport } from '../../src/tincan/modem.js';
 import {
-  BANDS, PROFILES, DETECTOR_DEFAULTS, timing, maxRange, fastestProfileFor, longestRangeProfile,
+  BANDS, PROFILES, DETECTOR_DEFAULTS, timing, maxRange, fastestProfileFor, longestRangeProfile, bandsCompatible,
 } from '../../src/tincan/params.js';
 import { buildTransmission, formatFrame } from '../../src/tincan/frame.js';
 import {
-  Session, baseId, describeId, PRIO, TOPIC, segment,
+  Session, baseId, describeId, describeControl, parseBaseId, PRIO, TOPIC, segment, BROADCAST_BASE,
+  assessProposal, linkTimeout, DECLINE, DECLINE_TEXT, CLOSE, CLOSE_TEXT,
 } from '../../src/tincan/transport.js';
 import {
   $, el, hex, hexBytes, parseHexBytes, parseId, db, download, reportHeader, reportName,
@@ -146,6 +147,8 @@ function setLive(live) {
   $('#stop').disabled = !live;
   for (const s of ['#band', '#profile', '#address', '#callsign', '#mic']) $(s).disabled = live;
   $('#mic').micAdvice?.();
+  setLinkControls();
+  if (live) fillLinkChoices();
 }
 
 /* ---------------------------------------------------------------- */
@@ -189,6 +192,7 @@ $('#start').addEventListener('click', async () => {
     });
     session.on('transport-error', ({ source, error }) =>
       log.add(`transport error from ${source}: ${escapeHtml(error)}`, 'err'));
+    wireLinks(session);
 
     setLive(true);
     setState('on the bus', 'live');
@@ -202,6 +206,13 @@ $('#start').addEventListener('click', async () => {
 });
 
 $('#stop').addEventListener('click', async () => {
+  // Part 2 §8.3: close side links on the main bus before leaving it.
+  if (link && link.rec.state !== 'closed') {
+    setState('closing side link…', 'live');
+    session.closeLink(link.rec, CLOSE.FINISHED);
+    await stopLink();
+    await waitForQueue(modem, 3 * 123 * timing(profSel.value).bitTime * 1000);
+  }
   if (modem) await modem.stop();
   modem = null; session = null;
   setLive(false);
@@ -335,8 +346,9 @@ function wire(m) {
 
   m.on('frame', (e) => {
     const f = e.detail.frame;
+    const control = !f.extended && parseBaseId(f.id).topic === TOPIC.CONTROL ? describeControl(f.data) : null;
     log.add(`← ${escapeHtml(formatFrame(f))} `
-      + `<span class="muted">${escapeHtml(describeId(f).text)}</span>`);
+      + `<span class="muted">${escapeHtml(describeId(f).text)}${control ? ` — ${escapeHtml(control)}` : ''}</span>`);
   });
 
   m.on('error-frame', (e) => {
@@ -492,7 +504,7 @@ function renderPeers() {
       el('span', { class: 'body' },
         p.callsign || '(no callsign)',
         el('span', { class: 'muted' }, ` v${p.version.toString(16)}`
-          + (p.segmented ? ' seg' : '') + (p.text ? ' text' : '')))));
+          + (p.segmented ? ' seg' : '') + (p.text ? ' text' : '') + (p.sideLinks ? ' links' : '')))));
   }
 }
 renderPeers();
@@ -599,3 +611,244 @@ function updateHints() {
   }
 }
 updateHints();
+
+/* ---------------------------------------------------------------- */
+/* side links — Part 2 §8                                            */
+/* ---------------------------------------------------------------- */
+
+/** The open link: its record, its own modem and session, and whether it is up. */
+let link = null;
+const linkLog = new LogView($('#linklog'), { limit: 200 });
+const offers = new Map();
+
+function setLinkState(text, kind = '') {
+  $('#linkstate').textContent = text;
+  $('#linkstate').className = `pill ${kind}`;
+}
+
+/** This device's measured t_slop for `profile`, in ms, or null. */
+function mySlop(profile = profSel.value) {
+  const name = micName(modem?.diagnostics().input?.label || $('#mic').selectedOptions[0]?.textContent);
+  return measuredSlop(name, profile)?.slopMs ?? null;
+}
+
+function fillLinkChoices() {
+  const main = bandSel.value;
+  const band = $('#linkband');
+  const keep = band.value;
+  band.replaceChildren(...Object.entries(BANDS).filter(([k]) => k !== main)
+    .map(([k, b]) => el('option', { value: k }, `${b.name} — ${b.fR}/${b.fD} Hz`)));
+  band.value = BANDS[keep] && keep !== main ? keep : (main === 'C' ? 'B' : 'C');
+
+  const prof = $('#linkprofile');
+  const keepP = prof.value;
+  prof.replaceChildren(...Object.entries(PROFILES).map(([k, p]) =>
+    el('option', { value: k }, `${k} — ${Math.round(timing(p).bitRate)} bit/s`)));
+  // The fastest this device's audio path allows, with another as slow.
+  const slop = mySlop('T25');
+  prof.value = (PROFILES[keepP] && keepP) || (slop !== null ? fastestProfileFor(slop) : null) || 'T5';
+  describeLink();
+}
+
+function describeLink() {
+  const band = $('#linkband').value;
+  const profile = $('#linkprofile').value;
+  if (!BANDS[band] || !PROFILES[profile]) return;
+  const t = timing(profile);
+  const main = timing(profSel.value);
+  const slop = mySlop(profile);
+  const notes = [`${(t.bitRate / main.bitRate).toFixed(t.bitRate >= main.bitRate ? 1 : 2)}× the main bus's speed.`];
+  if (!bandsCompatible(bandSel.value, profSel.value, band, profile)) {
+    notes.push(`<b>Bands ${bandSel.value} and ${band} cannot share a device at these profiles</b> (Part 2 §8.2): `
+      + 'use T10 or slower on both, or another band.');
+  }
+  if (slop !== null && maxRange(profile, slop) <= 0) {
+    notes.push(`<b>${profile} cannot cover this device's ${slop.toFixed(0)} ms audio path</b>; `
+      + `${fastestProfileFor(slop) ?? 'no profile'} is the fastest that can.`);
+  } else if (slop === null) {
+    notes.push('This device\'s audio path is not measured, so the peer will judge the timing alone.');
+  }
+  if (band === 'B') notes.push('Band B needs a speaker and microphone that work above 17 kHz, and carries only a few metres.');
+  $('#linknote').innerHTML = notes.join(' ');
+}
+
+function fillLinkPeers() {
+  const sel = $('#linkpeer');
+  const keep = sel.value;
+  sel.replaceChildren(el('option', { value: String(BROADCAST_BASE) }, 'anyone who wants to'),
+    ...[...peers].filter(([, p]) => p.sideLinks)
+      .map(([addr, p]) => el('option', { value: String(addr) }, `${p.callsign || 'node'} (${addr})`)));
+  if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+}
+
+for (const s of ['#linkband', '#linkprofile']) $(s).addEventListener('change', describeLink);
+bandSel.addEventListener('change', fillLinkChoices);
+profSel.addEventListener('change', describeLink);
+fillLinkChoices();
+fillLinkPeers();
+
+function setLinkControls() {
+  const live = !!session;
+  const open = !!link;
+  $('#linkpropose').disabled = !live || open;
+  $('#linkclose').disabled = !open;
+  $('#linktext').disabled = !link?.up;
+  $('#linksend').disabled = !link?.up;
+  for (const s of ['#linkpeer', '#linkband', '#linkprofile']) $(s).disabled = open;
+}
+setLinkControls();
+
+function wireLinks(s) {
+  s.on('presence', fillLinkPeers);
+  s.on('link-proposal', ({ link: rec }) => onProposal(rec));
+  s.on('link-open', ({ link: rec }) => openLink(rec));
+  s.on('link-declined', ({ link: rec, by, reason }) => {
+    linkLog.add(`node ${by} declined #${rec.link}: ${escapeHtml(DECLINE_TEXT[reason] ?? String(reason))}`, 'err');
+    setLinkState('declined', 'bad');
+  });
+  s.on('link-closed', ({ link: rec, reason, by }) => {
+    if (by !== s.address) linkLog.add(`node ${by} closed #${rec.link}: ${escapeHtml(CLOSE_TEXT[reason] ?? String(reason))}`);
+    stopLink();
+  });
+}
+
+$('#linkpropose').addEventListener('click', () => {
+  const to = Number($('#linkpeer').value);
+  const band = $('#linkband').value;
+  const profile = $('#linkprofile').value;
+  const rec = session.proposeLink({ to, band, profile, slopMs: mySlop(profile) });
+  linkLog.add(`proposed #${rec.link} to ${to === BROADCAST_BASE ? 'anyone' : `node ${to}`}: band ${band}, ${profile} `
+    + '<span class="muted">— the answer comes on the main bus</span>', 'tx');
+  setLinkState('proposed', 'live');
+});
+
+$('#linkclose').addEventListener('click', () => {
+  if (!link) return;
+  session.closeLink(link.rec, CLOSE.FINISHED);
+  linkLog.add(`closed #${link.rec.link}`, 'tx');
+  stopLink();
+});
+
+function onProposal(rec) {
+  const canUseBand = (b) => b !== 'B' || (modem?.ctx?.sampleRate ?? 48000) >= 44100;
+  const reason = link ? DECLINE.BUSY : assessProposal(rec, {
+    mainBand: bandSel.value, mainProfile: profSel.value, slopMs: mySlop(rec.profile ?? profSel.value),
+    bandsInUse: session.bandsInUse(), canUseBand,
+  });
+  const who = peers.get(rec.proposer)?.callsign || `node ${rec.proposer}`;
+  const what = `band ${rec.band}, ${rec.profile}`;
+  if (reason) {
+    session.declineLink(rec, reason);
+    linkLog.add(`declined ${escapeHtml(who)}'s #${rec.link} (${what}): ${escapeHtml(DECLINE_TEXT[reason])}`, 'warnrow');
+    return;
+  }
+  const key = `${rec.proposer}:${rec.link}`;
+  const row = el('p', { class: 'note' },
+    `${who} proposes a side link: ${what}, ${(timing(rec.profile).bitRate / timing(profSel.value).bitRate).toFixed(1)}× `
+    + 'the main bus. ',
+    el('button', { class: 'primary', onclick: () => { offers.delete(key); row.remove(); session.acceptLink(rec, mySlop(rec.profile)); } }, 'Accept'),
+    ' ',
+    el('button', { onclick: () => { offers.delete(key); row.remove(); session.declineLink(rec, DECLINE.REFUSED); } }, 'Decline'));
+  offers.set(key, row);
+  $('#linkoffers').append(row);
+  linkLog.add(`${escapeHtml(who)} proposes #${rec.link}: ${what}`);
+}
+
+/** Part 2 §8.3: start a second node on the link's band, keep the main one. */
+async function openLink(rec) {
+  if (link) return;
+  const peer = rec.proposer === session.address ? rec.peer : rec.proposer;
+  link = { rec, peer, up: false, modem: null, session: null, timer: null, sent: 0, recv: 0, errors: 0 };
+  setLinkState('opening…', 'live');
+  setLinkControls();
+  for (const row of offers.values()) row.remove();
+  offers.clear();
+  linkLog.add(`opening #${rec.link} with node ${peer}: band ${rec.band}, ${rec.profile}`);
+  try {
+    const m = new Modem({
+      band: rec.band, profile: rec.profile, mode: 'node', amplitude: Number($('#amp').value) / 100,
+      name: `${session.callsign || 'node'}-link`, deviceId: $('#mic').value || undefined, ...thresholds(),
+    });
+    link.modem = m;
+    await m.start();
+    if (modem?.measuredLatencyMs != null) m.measuredLatencyMs = modem.measuredLatencyMs;
+    const ls = new Session({ on: (ev, fn) => m.on(ev, (e) => fn(e.detail)), send: (f) => m.send(f) },
+      { address: session.address, callsign: session.callsign });
+    link.session = ls;
+    m.on('delivered', () => { link && link.sent++; showLinkCounters(); });
+    m.on('frame', () => { link && link.recv++; showLinkCounters(); });
+    m.on('error-frame', (e) => {
+      if (!link) return;
+      link.errors++;
+      showLinkCounters();
+      linkLog.add(escapeHtml(e.detail.kind === 'ack' ? 'no acknowledgement on the link' : `${e.detail.kind} error`), 'err');
+    });
+    ls.on('presence', ({ address }) => {
+      if (!link || address !== peer || link.up) return;
+      link.up = true;
+      clearTimeout(link.timer);
+      setLinkState(`up: band ${rec.band}, ${rec.profile}`, 'ok');
+      linkLog.add(`#${rec.link} is up: heard node ${peer} on band ${rec.band}`, 'tx');
+      if (rec.proposer !== session.address) ls.announce();     // answer the proposer's
+      setLinkControls();
+    });
+    ls.on('message', ({ text, data }) => {
+      const who = peers.get(peer)?.callsign || `node ${peer}`;
+      chat.add(`<b>${escapeHtml(who)}</b> <span class="muted">(side link)</span> `
+        + (text !== null ? escapeHtml(text) : hexBytes(data)));
+    });
+    if (rec.proposer === session.address) ls.announce();
+    const limit = linkTimeout(rec.profile);
+    link.timer = setTimeout(() => {
+      if (!link || link.up) return;
+      linkLog.add(`nothing heard on #${rec.link} in ${limit.toFixed(0)} s: closing`, 'err');
+      session.closeLink(rec, CLOSE.NO_CONTACT);
+      stopLink();
+    }, limit * 1000);
+  } catch (err) {
+    linkLog.add(`could not start the link: ${escapeHtml(err.message || err)}`, 'err');
+    session.closeLink(rec, CLOSE.ERRORS);
+    await stopLink();
+  }
+}
+
+async function stopLink() {
+  if (!link) return;
+  const l = link;
+  link = null;
+  clearTimeout(l.timer);
+  if (l.modem) await l.modem.stop().catch(() => {});
+  setLinkState(`closed #${l.rec.link}`);
+  setLinkControls();
+}
+
+function showLinkCounters() {
+  if (!link) return;
+  $('#lsent').textContent = String(link.sent);
+  $('#lrecv').textContent = String(link.recv);
+  $('#lerr').textContent = String(link.errors);
+}
+
+function sendLinkText() {
+  const text = $('#linktext').value;
+  if (!link?.up || !text) return;
+  link.session.sendText(text);
+  chat.add(`<b>${escapeHtml(session.callsign || 'me')}</b> <span class="muted">(side link)</span> ${escapeHtml(text)}`, 'tx');
+  $('#linktext').value = '';
+}
+$('#linksend').addEventListener('click', sendLinkText);
+$('#linktext').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendLinkText(); });
+
+/** Resolve once `m` has nothing left to send, or after `ms`. */
+function waitForQueue(m, ms) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const check = () => {
+      const q = lastStatus?.queue ?? 0;
+      if (!m.ready || (q === 0 && !lastStatus?.transmitting) || Date.now() - start > ms) resolve();
+      else setTimeout(check, 250);
+    };
+    setTimeout(check, 500);
+  });
+}
+

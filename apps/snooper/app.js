@@ -7,7 +7,7 @@
 
 import { Modem, checkSupport } from '../../src/tincan/modem.js';
 import { BANDS, PROFILES, timing, maxRange, longestRangeProfile } from '../../src/tincan/params.js';
-import { describeId, describePci, TOPIC, parseBaseId } from '../../src/tincan/transport.js';
+import { describeId, describePci, describeControl, TOPIC, parseBaseId } from '../../src/tincan/transport.js';
 import {
   $, el, hex, hexBytes, asciiBytes, LogView, topbar, escapeHtml, download, db, reportHeader, reportName,
   drawBits as drawBitStrip, drawMeter as drawLevels, fillMicrophones,
@@ -213,6 +213,10 @@ function render(rec) {
   if (!f.extended && parseBaseId(f.id).topic === TOPIC.TRANSPORT && bytes.length) {
     const pci = describePci(f.data);
     if (pci) annotation += ` <span class="muted">· ${escapeHtml(pci)}</span>`;
+  }
+  if (!f.extended && parseBaseId(f.id).topic === TOPIC.CONTROL && bytes.length) {
+    const control = describeControl(f.data);              // side links, Part 2 §8
+    if (control) annotation += ` <span class="muted">· ${escapeHtml(control)}</span>`;
   }
 
   const index = frames.length - 1;

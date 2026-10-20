@@ -63,6 +63,36 @@
       </div>
 
       <div class="panel">
+        <div class="row" style="margin-bottom:.6rem">
+          <h2 style="margin:0">Side link</h2>
+          <span class="spacer"></span>
+          <span id="linkstate" class="pill">none</span>
+        </div>
+        <p class="note" style="margin-top:0">A second, faster bus on another band, between this node and a
+          peer that can do better (<a href="../../spec/transport.html#8-side-links">Part 2 §8</a>). The main
+          bus carries on as before.</p>
+        <label class="field"><span>With</span><select id="linkpeer"></select></label>
+        <label class="field"><span>Band</span><select id="linkband"></select></label>
+        <label class="field"><span>Bit timing</span><select id="linkprofile"></select></label>
+        <p class="note" id="linknote"></p>
+        <div class="row">
+          <button id="linkpropose" disabled>Propose</button>
+          <button id="linkclose" disabled>Close link</button>
+        </div>
+        <div id="linkoffers"></div>
+        <div class="row" style="margin-top:.6rem">
+          <input id="linktext" type="text" placeholder="text over the side link" style="flex:1" disabled>
+          <button id="linksend" disabled>Send</button>
+        </div>
+        <div class="stats" style="margin-top:.6rem">
+          <div class="stat"><span>sent</span><b id="lsent">0</b></div>
+          <div class="stat"><span>received</span><b id="lrecv">0</b></div>
+          <div class="stat"><span>errors</span><b id="lerr">0</b></div>
+        </div>
+        <div id="linklog" class="log" style="max-height:10rem;margin-top:.6rem"></div>
+      </div>
+
+      <div class="panel">
         <h2>Counters</h2>
         <div class="stats">
           <div class="stat"><span>sent</span><b id="csent">0</b></div>
