@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinCAN Self-test</title>
+<meta name="description" content="Runs two real TinCAN nodes inside this browser, wired through a simulated room, to check that the browser can run a node at all.">
+<link rel="stylesheet" href="../../style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🥫</text></svg>">
+</head>
+<body>
+<div id="chrome"></div>
+
+<main class="wrap">
+  <h1 style="margin:0 0 .2rem;font-size:1.6rem;letter-spacing:-.02em">Self-test</h1>
+  <p style="margin:0 0 1.5rem;color:var(--dim)">
+    Runs two real <a href="../console/">Console</a> nodes — the same AudioWorklet, Modem and
+    Session code — inside this browser, wired to each other through a simulated room instead
+    of a speaker and microphone. It needs no microphone, makes no sound, and takes a few
+    seconds. If it passes, this browser can run a node, and any trouble between two devices
+    is in the air between them, not in the browser.
+  </p>
+
+  <div class="panel">
+    <div class="row">
+      <button id="run" class="primary">Run the self-test</button>
+      <span class="spacer"></span>
+      <span id="verdict" class="pill">not run</span>
+    </div>
+    <p class="note" id="env"></p>
+  </div>
+
+  <div class="panel">
+    <h2>Checks</h2>
+    <div id="checks" class="log"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Bus log</h2>
+    <div id="log" class="log" style="max-height:24rem"></div>
+  </div>
+</main>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
