@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  Modem, checkSupport, listMicrophones, wirelessMicReason, builtInMicrophone, CAPTURE_CONSTRAINTS,
+  Modem, checkSupport, listMicrophones, wirelessMicReason, builtInMicrophone, CAPTURE_CONSTRAINTS, audioConstraints,
 } from '../src/tincan/modem.js';
 
 /**
@@ -80,7 +80,10 @@ test('Modem.start asks for raw capture and wires microphone → worklet → spea
 
   await modem.start();
 
-  assert.deepEqual(calls.constraints, { audio: CAPTURE_CONSTRAINTS });
+  // Chrome lists the system default as 'default', and gives the site's last
+  // choice instead unless asked for it by name.
+  assert.deepEqual(calls.constraints, { audio: { ...CAPTURE_CONSTRAINTS, deviceId: { exact: 'default' } } });
+  assert.deepEqual(calls.contextOptions, { latencyHint: 0 }, 'the smallest audio buffers the browser offers');
   assert.deepEqual(CAPTURE_CONSTRAINTS,
     { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 },
     'every capture stage that would alter the signal is off');
@@ -245,4 +248,14 @@ test('a node capturing from a wireless microphone is told to use the built-in on
   assert.match(warnings[0], /iPhone 16/);
   assert.match(warnings[0], /built-in microphone/);
   await modem.stop();
+});
+
+test('a browser with no "default" microphone entry is left to pick its own default', async () => {
+  const calls = fakeBrowser();
+  const devices = navigator.mediaDevices;
+  devices.enumerateDevices = async () => [{ kind: 'audioinput', deviceId: 'mic1', label: 'Internal Microphone' }];
+  await new Modem().start();
+  assert.deepEqual(calls.constraints, { audio: CAPTURE_CONSTRAINTS });
+  assert.deepEqual(await audioConstraints(''), CAPTURE_CONSTRAINTS);
+  assert.deepEqual(await audioConstraints('mic1'), { ...CAPTURE_CONSTRAINTS, deviceId: { exact: 'mic1' } });
 });

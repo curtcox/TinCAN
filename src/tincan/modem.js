@@ -23,6 +23,32 @@ export const CAPTURE_CONSTRAINTS = {
   channelCount: 1,
 };
 
+/**
+ * The AudioContext options for a node. `latencyHint: 0` asks for the smallest
+ * buffers the browser will give. On a MacBook Pro in Chrome that measured
+ * 60–63 ms from speaker to microphone, against 64–72 ms for 'interactive',
+ * and every millisecond counts against PROP_SEG (spec §5.5).
+ */
+export const CONTEXT_OPTIONS = { latencyHint: 0 };
+
+/**
+ * getUserMedia audio constraints for the microphone `deviceId`, or for the
+ * system default when it is empty.
+ *
+ * Asking for no device in particular does not get the system default in
+ * Chrome: it gets the microphone last chosen for this site, in its permission
+ * prompt or site settings, which can be a phone left over from a call. Chrome
+ * lists the system default as the device 'default', so ask for that by name;
+ * other browsers have no such entry and do give the default.
+ */
+export async function audioConstraints(deviceId) {
+  if (deviceId) return { ...CAPTURE_CONSTRAINTS, deviceId: { exact: deviceId } };
+  const mics = await listMicrophones().catch(() => []);
+  return mics.some((m) => m.deviceId === 'default')
+    ? { ...CAPTURE_CONSTRAINTS, deviceId: { exact: 'default' } }
+    : CAPTURE_CONSTRAINTS;
+}
+
 export class Modem extends EventTarget {
   /**
    * @param {object} [opts]
@@ -69,13 +95,11 @@ export class Modem extends EventTarget {
   async start() {
     if (this.ready) return this;
 
-    const audio = this.opts.deviceId
-      ? { ...CAPTURE_CONSTRAINTS, deviceId: { exact: this.opts.deviceId } }
-      : CAPTURE_CONSTRAINTS;
+    const audio = await audioConstraints(this.opts.deviceId);
     this.stream = await navigator.mediaDevices.getUserMedia({ audio });
     this._checkCaptureSettings();
 
-    this.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)(CONTEXT_OPTIONS);
     if (this.ctx.state === 'suspended') await this.ctx.resume();
     // Some browsers fire statechange without the state changing; report changes only.
     let lastState = this.ctx.state;

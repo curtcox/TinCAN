@@ -8,7 +8,7 @@
  */
 
 import {
-  Modem, CAPTURE_CONSTRAINTS, listMicrophones, wirelessMicReason, builtInMicrophone,
+  Modem, CONTEXT_OPTIONS, audioConstraints, listMicrophones, wirelessMicReason, builtInMicrophone,
 } from '../../src/tincan/modem.js';
 import { Session } from '../../src/tincan/transport.js';
 import { formatFrame } from '../../src/tincan/frame.js';
@@ -178,12 +178,9 @@ function setMicState(text, kind = '') {
  * the same capture constraints and kind of AudioContext the Console uses.
  */
 async function capture(signal, seconds) {
-  const deviceId = $('#mic').value;
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: deviceId ? { ...CAPTURE_CONSTRAINTS, deviceId: { exact: deviceId } } : CAPTURE_CONSTRAINTS,
-  });
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: await audioConstraints($('#mic').value) });
   fillMicrophones($('#mic'), $('#micadvice'));     // named now that access is granted
-  const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+  const ctx = new (window.AudioContext || window.webkitAudioContext)(CONTEXT_OPTIONS);
   try {
     const track = stream.getAudioTracks()[0];
     const settings = track?.getSettings?.() || {};

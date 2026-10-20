@@ -245,7 +245,9 @@ function measureRepeat(x, fs, chirpAt, lag = 0) {
     let sxy = 0, sxx = 0;
     for (const [px, py] of pts) { sxy += (px - mx) * (py - my); sxx += (px - mx) ** 2; }
     const slope = sxy / sxx;                        // dB per second, negative
-    if (slope < 0) rt60 = 60 / -slope;
+    // Under 10 dB of fall is fluctuating noise, not a decay: one such fit
+    // through an iPhone microphone claimed an RT60 of 22 s.
+    if (slope < 0 && -slope * (pts[n - 1][0] - pts[0][0]) >= 10) rt60 = 60 / -slope;
   }
   return { profiles, rt60, decayPoints: pts.length };
 }
