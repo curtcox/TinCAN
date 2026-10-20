@@ -39,6 +39,31 @@
     <h2>Bus log</h2>
     <div id="log" class="log" style="max-height:24rem"></div>
   </div>
+
+  <h2 style="margin:2.5rem 0 .2rem;font-size:1.3rem">Microphone check</h2>
+  <p style="margin:0 0 1.5rem;color:var(--dim)">
+    The test above leaves out the air. This measures it: it plays about five seconds of tones
+    on this device's speaker, at the Console's transmit level, and records what its own
+    microphone hears. Set the volume where you will use the Console, and keep the room quiet.
+    Then, to compare with a second device, press <b>Listen</b> here and <b>Measure this device</b>
+    on the other one, placed where it will be when you use the Console.
+  </p>
+
+  <div class="panel">
+    <div class="row">
+      <button id="measure" class="primary">Measure this device</button>
+      <button id="listen" disabled>Listen for the other device</button>
+      <span class="spacer"></span>
+      <span id="micstate" class="pill">not run</span>
+    </div>
+    <div id="micwarnings"></div>
+    <p class="note" id="micsummary">Uses the microphone. Nothing is recorded beyond this page.</p>
+  </div>
+
+  <div class="panel">
+    <h2>What it means</h2>
+    <div id="verdicts" class="log" style="max-height:none"></div>
+  </div>
 </main>
 
 <script type="module" src="app.js"></script>

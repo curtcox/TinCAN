@@ -1,15 +1,19 @@
 /**
- * TinCAN Self-test — two real nodes in one browser, through a simulated room.
+ * TinCAN Self-test — two real nodes in one browser, through a simulated room,
+ * and a microphone check that measures the real one.
  *
  * The same harness as test/worklet.test.mjs, but on the browser's own
  * AudioWorklet, MessagePort and module loader, which no Node test can reach.
  * It renders offline, so it is silent and faster than real time.
  */
 
-import { Modem } from '../../src/tincan/modem.js';
+import { Modem, CAPTURE_CONSTRAINTS } from '../../src/tincan/modem.js';
 import { Session } from '../../src/tincan/transport.js';
 import { formatFrame } from '../../src/tincan/frame.js';
 import { $, el, LogView, topbar, escapeHtml } from '../ui.js';
+import {
+  buildProbeSignal, analyseSelf, analysePeer, assess, RECORD_SECONDS, TONE_HZ,
+} from './probe.js';
 
 $('#chrome').replaceWith(topbar('Self-test'));
 
@@ -143,5 +147,118 @@ $('#run').addEventListener('click', async () => {
     setVerdict('fail', 'bad');
   } finally {
     $('#run').disabled = false;
+  }
+});
+
+/* ---------------------------------------------------------------- */
+/* microphone check                                                  */
+/* ---------------------------------------------------------------- */
+
+const PROBE_URL = new URL('./probe-worklet.js', import.meta.url);
+const LISTEN_SECONDS = 15;
+let ownResult = null;
+let peerResult = null;
+const verdicts = new LogView($('#verdicts'), { limit: 100 });
+
+function setMicState(text, kind = '') {
+  $('#micstate').textContent = text;
+  $('#micstate').className = `pill ${kind}`;
+}
+
+/**
+ * Play `signal` (or nothing) and record the microphone for `seconds`, through
+ * the same capture constraints and kind of AudioContext the Console uses.
+ */
+async function capture(signal, seconds) {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: CAPTURE_CONSTRAINTS });
+  const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+  try {
+    const settings = stream.getAudioTracks()[0]?.getSettings?.() || {};
+    const ignored = ['echoCancellation', 'noiseSuppression', 'autoGainControl'].filter((k) => settings[k] === true);
+    $('#micwarnings').replaceChildren(...ignored.map((k) => el('p', { class: 'note warn' },
+      `${k} is still on: this browser ignored the request to turn it off, so these figures `
+      + 'describe the processed signal, and so will the Console\'s.')));
+
+    if (ctx.state === 'suspended') await ctx.resume();
+    if (ctx.state !== 'running') throw new Error(`the audio context is ${ctx.state}, not running`);
+    await ctx.audioWorklet.addModule(PROBE_URL);
+    const fs = ctx.sampleRate;
+    const probe = new AudioWorkletNode(ctx, 'tincan-probe', {
+      numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+      processorOptions: { signal: signal ? signal(fs) : new Float32Array(0), recordSamples: Math.round(seconds * fs) },
+    });
+    const recording = new Promise((resolve) => { probe.port.onmessage = (e) => resolve(e.data.recording); });
+    ctx.createMediaStreamSource(stream).connect(probe);
+    probe.connect(ctx.destination);
+    return { recording: await recording, fs, reported: (ctx.outputLatency || ctx.baseLatency || 0) + (settings.latency || 0) };
+  } finally {
+    for (const t of stream.getTracks()) t.stop();
+    ctx.close();
+  }
+}
+
+const mark = (ok) => (ok === true ? '✓' : ok === false ? '✗' : '–');
+
+function render() {
+  verdicts.clear();
+  if (!ownResult) return;
+  const a = assess(ownResult, peerResult);
+  for (const c of a.general) {
+    verdicts.add(`${mark(c.ok)} <b>${escapeHtml(c.name)}</b> — ${escapeHtml(c.detail)}`, c.ok === false ? 'err' : '');
+  }
+  if (a.rt60 !== null) verdicts.add(`– <b>room</b> — reverberation time about ${a.rt60.toFixed(2)} s at ${TONE_HZ} Hz`);
+  for (const p of a.profiles) {
+    const bad = p.checks.filter((c) => c.ok === false).length;
+    const unknown = p.checks.filter((c) => c.ok === null).length;
+    verdicts.add(`<b>${p.profile}</b> — ${bad ? `${bad} problem${bad > 1 ? 's' : ''}` : unknown ? 'no problems yet' : 'should work'}`,
+      bad ? 'err' : '');
+    for (const c of p.checks) {
+      verdicts.add(`&nbsp;&nbsp;${mark(c.ok)} ${escapeHtml(c.name)} — ${escapeHtml(c.detail)}`, c.ok === false ? 'err' : '');
+    }
+  }
+}
+
+$('#measure').addEventListener('click', async () => {
+  $('#measure').disabled = true;
+  $('#listen').disabled = true;
+  setMicState('playing…', 'live');
+  try {
+    const { recording, fs, reported } = await capture(buildProbeSignal, RECORD_SECONDS);
+    ownResult = analyseSelf(recording, fs);
+    setMicState(ownResult.heard ? 'measured' : 'heard nothing', ownResult.heard ? 'ok' : 'bad');
+    $('#micsummary').textContent = ownResult.heard
+      ? `Speaker-to-microphone latency ${(ownResult.latency * 1000).toFixed(1)} ms `
+        + `(the browser reports ${(reported * 1000).toFixed(1)} ms) at ${fs} Hz.`
+      : 'This device did not hear its own test signal.';
+    render();
+  } catch (err) {
+    setMicState('failed', 'bad');
+    $('#micsummary').textContent = `Could not run the check: ${err.message || err}`;
+  } finally {
+    $('#measure').disabled = false;
+    $('#listen').disabled = !ownResult || !ownResult.heard;
+  }
+});
+
+$('#listen').addEventListener('click', async () => {
+  $('#measure').disabled = true;
+  $('#listen').disabled = true;
+  setMicState(`listening for ${LISTEN_SECONDS} s…`, 'live');
+  try {
+    const { recording, fs } = await capture(null, LISTEN_SECONDS);
+    const peer = analysePeer(recording, fs);
+    if (peer.heard) {
+      peerResult = peer;
+      setMicState('compared', 'ok');
+    } else {
+      setMicState('heard no other device', 'warn');
+    }
+    render();
+  } catch (err) {
+    setMicState('failed', 'bad');
+    $('#micsummary').textContent = `Could not listen: ${err.message || err}`;
+  } finally {
+    $('#measure').disabled = false;
+    $('#listen').disabled = false;
   }
 });
