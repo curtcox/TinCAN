@@ -92,8 +92,12 @@ export class Modem extends EventTarget {
     if (!this.ctx) return undefined;
     if (this.measuredLatencyMs != null) return this.measuredLatencyMs + (this.timing.tq / 4) * 1000;
     const out = (this.ctx.outputLatency || this.ctx.baseLatency || 0) * 1000;
+    // The track's own statistics, where the browser keeps them, give the
+    // input latency the device really has (34 ms on a MacBook Pro in Chrome,
+    // where its settings claim 2.7 ms).
+    const stats = this._inputStats();
     const settings = this.stream && this.stream.getAudioTracks()[0]?.getSettings?.();
-    const inp = settings && settings.latency ? settings.latency * 1000 : 0;
+    const inp = stats?.latency ?? (settings && settings.latency ? settings.latency * 1000 : 0);
     const hop = (this.timing.tq / 4) * 1000;
     return out + inp + hop;
   }
@@ -162,7 +166,30 @@ export class Modem extends EventTarget {
    * The worklet reports ten times a second. If that stops, the audio thread
    * is not running, and nothing else on the page will say so.
    */
+  /** The capture track's statistics (Chrome), or null. */
+  _inputStats() {
+    const track = this.stream && this.stream.getAudioTracks()[0];
+    try { return track && track.stats ? track.stats : null; } catch { return null; }
+  }
+
+  /**
+   * Audio the microphone produced but the page never got, in ms. A gap moves
+   * every later edge relative to this node's bit clock, as a jump the
+   * resynchronization of §5.5 can only follow by SJW per edge.
+   */
+  _checkDropped() {
+    const s = this._inputStats();
+    if (!s || !s.totalFramesDuration) return;
+    const dropped = s.totalFramesDuration - s.deliveredFramesDuration;
+    const before = this.droppedInputMs ?? dropped;
+    this.droppedInputMs = dropped;
+    if (dropped > before + 0.5) {
+      this.dispatchEvent(new CustomEvent('input-dropped', { detail: { ms: dropped - before, totalMs: dropped } }));
+    }
+  }
+
   _watch(now = Date.now()) {
+    this._checkDropped();
     const quiet = now - this.lastStatusAt > 2000;
     if (quiet && !this.stalled) {
       this.stalled = true;
@@ -191,7 +218,12 @@ export class Modem extends EventTarget {
       measuredSlopMs: this.measuredSlopMs ?? null,
       latencySource: this.measuredLatencyMs != null ? 'measured' : 'reported by the browser',
       maxRange: this.ctx ? this.maxRange : null,
-      input: track ? { label: track.label || '', settings: track.getSettings ? track.getSettings() : {} } : null,
+      input: track ? {
+        label: track.label || '',
+        settings: track.getSettings ? track.getSettings() : {},
+        latencyMs: this._inputStats()?.latency ?? null,
+        droppedMs: this.droppedInputMs ?? null,
+      } : null,
       stalled: this.stalled,
       warnings: [...this.warnings],
     };

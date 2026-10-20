@@ -371,6 +371,12 @@ function wire(m) {
 
   m.on('rejected', (e) => log.add(`frame rejected: ${escapeHtml(e.detail.error)}`, 'err'));
 
+  m.on('input-dropped', (e) => {
+    diag.droppedMs = e.detail.totalMs;
+    log.add(`the browser dropped ${e.detail.ms.toFixed(0)} ms of microphone audio: bits around now may be `
+      + 'misread, and a frame in flight may fail', 'warnrow');
+  });
+
   m.on('status', (e) => onStatus(e.detail));
 }
 
@@ -464,7 +470,7 @@ $('#report').addEventListener('click', () => {
     },
     audio: modem ? modem.diagnostics() : null,
     status: lastStatus && { ...lastStatus, bits: undefined },
-    diagnostics: { stalls: diag.stalls, overloads: diag.overloads, warned: [...diag.warned] },
+    diagnostics: { stalls: diag.stalls, overloads: diag.overloads, droppedMs: diag.droppedMs ?? 0, warned: [...diag.warned] },
     peers: [...peers].map(([address, a]) => ({ address, callsign: a.callsign, version: a.version })),
     events,
     bits: bitHistory,

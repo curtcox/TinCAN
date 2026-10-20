@@ -275,3 +275,24 @@ test('a latency measured by the self-test replaces the browser\'s figure for t_s
   assert.equal(modem.maxRange, 0, 'T10 cannot absorb it');
   assert.equal(modem.diagnostics().latencySource, 'measured');
 });
+
+test('the Modem takes input latency from the track\'s statistics, and reports dropped microphone audio', async () => {
+  fakeBrowser({ settings: { latency: 0.0027 } });
+  const modem = new Modem({ profile: 'T5' });
+  await modem.start();
+  const track = modem.stream.getAudioTracks()[0];
+  // Chrome on a MacBook Pro: the settings claim 2.7 ms, the statistics 34.
+  track.stats = { latency: 34.2, totalFramesDuration: 1000, deliveredFramesDuration: 1000 };
+  assert.equal(modem.measuredSlopMs, 20 + 34.2 + 2.5, 'output, real input, and a hop');
+  assert.equal(modem.diagnostics().input.latencyMs, 34.2);
+
+  const drops = [];
+  modem.on('input-dropped', (e) => drops.push(e.detail));
+  modem._watch();
+  assert.deepEqual(drops, [], 'nothing dropped yet');
+  track.stats = { latency: 34.2, totalFramesDuration: 3000, deliveredFramesDuration: 2880 };
+  modem._watch();
+  assert.deepEqual(drops, [{ ms: 120, totalMs: 120 }]);
+  assert.equal(modem.diagnostics().input.droppedMs, 120);
+  await modem.stop();
+});
