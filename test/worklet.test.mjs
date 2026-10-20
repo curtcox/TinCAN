@@ -255,3 +255,46 @@ test('a Console recovers from its microphone dropping out for three seconds', ()
 
   assertConversed(ada, bob);
 });
+
+test('a reply queued while the other Console is mid-message waits its turn without a collision',
+  { todo: 'each Console hears its own recessive tone 10× louder than the other\'s dominant, past the 8.6 dB margin of §4.6, so neither withdraws; the frames collide, neither is acknowledged, and both retry until they fall out of step' },
+  () => {
+    // The everyday case: bob answers while ada's two-frame message is still
+    // on the bus, so when it frees bob's reply and ada's second frame start in
+    // the same bit. Here each laptop hears itself 10× louder than the other.
+    const ada = consoleNode({ name: 'ada', address: 3 });
+    const bob = consoleNode({ name: 'bob', address: 12 });
+    const run = room([ada, bob], { gain: [[10, 1], [1, 10]] });
+    const collisions = [];
+    for (const n of [ada, bob]) n.modem.on('error-frame', (e) => collisions.push(e.detail.kind));
+
+    run(0.5);
+    ada.session.sendText('hello bob');
+    run(2);
+    bob.session.sendText('hi ada');
+    run(20);
+
+    assert.deepEqual(bob.heard, ['hello bob']);
+    assert.deepEqual(ada.heard, ['hi ada']);
+    assert.deepEqual(collisions, [], 'arbitration settled it: no frame was destroyed');
+    assert.equal(ada.modem.status.stats.arbitrationsLost, 1, 'ada\'s second frame (priority 6) yielded to bob\'s reply (priority 5)');
+  });
+
+test('the same reply arbitrates cleanly when each Console hears itself no louder than the other', () => {
+  const ada = consoleNode({ name: 'ada', address: 3 });
+  const bob = consoleNode({ name: 'bob', address: 12 });
+  const run = room([ada, bob]);
+  const collisions = [];
+  for (const n of [ada, bob]) n.modem.on('error-frame', (e) => collisions.push(e.detail.kind));
+
+  run(0.5);
+  ada.session.sendText('hello bob');
+  run(2);
+  bob.session.sendText('hi ada');
+  run(20);
+
+  assert.deepEqual(bob.heard, ['hello bob']);
+  assert.deepEqual(ada.heard, ['hi ada']);
+  assert.deepEqual(collisions, []);
+  assert.equal(ada.modem.status.stats.arbitrationsLost, 1);
+});
