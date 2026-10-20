@@ -50,7 +50,7 @@ bandSel.addEventListener('change', describePhy);
 profSel.addEventListener('change', describePhy);
 describePhy();
 
-fillMicrophones($('#mic'));
+fillMicrophones($('#mic'), $('#micadvice'));
 
 $('#amp').addEventListener('input', (e) => {
   const v = Number(e.target.value) / 100;
@@ -112,6 +112,7 @@ function setLive(live) {
   $('#start').disabled = live;
   $('#stop').disabled = !live;
   for (const s of ['#band', '#profile', '#address', '#callsign', '#mic']) $(s).disabled = live;
+  $('#mic').micAdvice?.();
 }
 
 /* ---------------------------------------------------------------- */
@@ -132,7 +133,7 @@ $('#start').addEventListener('click', async () => {
     });
     wire(modem);
     await modem.start();
-    fillMicrophones($('#mic'));     // now the browser will name them
+    fillMicrophones($('#mic'), $('#micadvice'));     // now the browser will name them
     showAudio();
 
     // The Session helper is written against the pure Protocol interface, so

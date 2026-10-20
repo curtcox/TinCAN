@@ -8,17 +8,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { Modem, checkSupport, listMicrophones, CAPTURE_CONSTRAINTS } from '../src/tincan/modem.js';
+import {
+  Modem, checkSupport, listMicrophones, wirelessMicReason, builtInMicrophone, CAPTURE_CONSTRAINTS,
+} from '../src/tincan/modem.js';
 
 /**
  * Install a fake browser. `settings` is what the capture track reports back;
  * `suspended` keeps the AudioContext from ever running, as a browser does when
  * it decides the page has no user activation left.
  */
-function fakeBrowser({ settings = {}, suspended = false } = {}) {
+function fakeBrowser({ settings = {}, suspended = false, label = 'Built-in Microphone' } = {}) {
   const calls = { constraints: null, modules: [], wiring: [], posted: [], tracksStopped: 0, closed: false };
   const track = {
-    label: 'Built-in Microphone',
+    label,
     getSettings: () => ({ echoCancellation: false, noiseSuppression: false, autoGainControl: false, ...settings }),
     stop: () => { calls.tracksStopped++; },
   };
@@ -208,5 +210,39 @@ test('the Modem reports audio-context state changes, and only real ones', async 
   modem.ctx.state = 'running';
   modem.ctx.onstatechange();
   assert.deepEqual(states, ['interrupted', 'running']);
+  await modem.stop();
+});
+
+test('microphones that are probably wireless are recognised by name', () => {
+  for (const label of [
+    '2024 iPhone 16 Microphone', 'Default - 2024 iPhone 16 Microphone', 'Ada\'s iPad Microphone',
+    'AirPods Pro', 'Beats Studio Buds', 'Bose QC45 Bluetooth Headset', 'Hands-Free AG Audio',
+  ]) assert.ok(wirelessMicReason(label), label);
+  for (const label of [
+    'MacBook Pro Microphone', 'Built-in Microphone', 'External Microphone', 'Microphone Array (Realtek(R) Audio)',
+    'Yeti Stereo Microphone', '', undefined,
+  ]) assert.equal(wirelessMicReason(label), null, String(label));
+});
+
+test('the built-in microphone is picked out of a list that includes a wireless one', () => {
+  const mics = [
+    { deviceId: 'default', label: 'Default - 2024 iPhone 16 Microphone' },
+    { deviceId: 'phone', label: '2024 iPhone 16 Microphone' },
+    { deviceId: 'mac', label: 'MacBook Pro Microphone' },
+  ];
+  assert.equal(builtInMicrophone(mics).deviceId, 'mac');
+  assert.equal(builtInMicrophone(mics.slice(0, 2)), null);
+});
+
+test('a node capturing from a wireless microphone is told to use the built-in one', async () => {
+  fakeBrowser({ label: '2024 iPhone 16 Microphone' });
+  const modem = new Modem();
+  const warnings = [];
+  modem.on('warning', (e) => warnings.push(...e.detail.warnings));
+  await modem.start();
+
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /iPhone 16/);
+  assert.match(warnings[0], /built-in microphone/);
   await modem.stop();
 });

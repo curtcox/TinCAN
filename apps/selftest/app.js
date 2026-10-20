@@ -178,7 +178,7 @@ async function capture(signal, seconds) {
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: deviceId ? { ...CAPTURE_CONSTRAINTS, deviceId: { exact: deviceId } } : CAPTURE_CONSTRAINTS,
   });
-  fillMicrophones($('#mic'));     // named now that access is granted
+  fillMicrophones($('#mic'), $('#micadvice'));     // named now that access is granted
   const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
   try {
     const track = stream.getAudioTracks()[0];
@@ -212,7 +212,7 @@ const mark = (ok) => (ok === true ? '✓' : ok === false ? '✗' : '–');
 function render() {
   verdicts.clear();
   if (!ownResult) return;
-  const a = assess(ownResult, peerResult);
+  const a = assess(ownResult, peerResult, { microphone: results.input?.label || '' });
   for (const c of a.general) {
     verdicts.add(`${mark(c.ok)} <b>${escapeHtml(c.name)}</b> — ${escapeHtml(c.detail)}`, c.ok === false ? 'err' : '');
   }
@@ -280,7 +280,7 @@ $('#listen').addEventListener('click', async () => {
   }
 });
 
-fillMicrophones($('#mic'));
+fillMicrophones($('#mic'), $('#micadvice'));
 
 $('#report').addEventListener('click', () => {
   const report = {
@@ -295,7 +295,7 @@ $('#report').addEventListener('click', () => {
     reportedLatency: results.reportedLatency ?? null,
     self: results.self,
     peer: results.peer,
-    assessment: ownResult ? assess(ownResult, peerResult) : null,
+    assessment: ownResult ? assess(ownResult, peerResult, { microphone: results.input?.label || '' }) : null,
   };
   download(`tincan-selftest-${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
     JSON.stringify(report, null, 1), 'application/json');

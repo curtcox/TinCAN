@@ -1,7 +1,7 @@
 /** Small shared helpers for the TinCAN apps. No framework. */
 
 import { DETECTOR_DEFAULTS } from '../src/tincan/params.js';
-import { listMicrophones } from '../src/tincan/modem.js';
+import { listMicrophones, wirelessMicReason, builtInMicrophone } from '../src/tincan/modem.js';
 
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -235,14 +235,18 @@ function rememberedMic() {
 
 /**
  * Fill `select` with the browser's microphones, keeping the one last chosen
- * on any TinCAN page. Call again after the first capture, when the browser
- * starts telling us their names. Returns the chosen deviceId ('' = default).
+ * on any TinCAN page, and put advice in `advice` when the choice looks
+ * wireless. Call again after the first capture, when the browser starts
+ * telling us their names. Returns the chosen deviceId ('' = default).
  */
-export async function fillMicrophones(select) {
+export async function fillMicrophones(select, advice = null) {
   let mics = [];
   try { mics = await listMicrophones(); } catch { /* none to list */ }
   const want = select.value || rememberedMic();
-  select.replaceChildren(el('option', { value: '' }, 'system default'),
+  // Chrome lists the system default separately, as "Default - <its name>".
+  const def = mics.find((m) => m.deviceId === 'default');
+  const defName = def ? def.label.replace(/^default\s*[-–:]\s*/i, '') : '';
+  select.replaceChildren(el('option', { value: '' }, defName ? `system default (${defName})` : 'system default'),
     ...mics.filter((m) => m.deviceId && m.deviceId !== 'default')
       .map((m) => el('option', { value: m.deviceId }, m.label)));
   if ([...select.options].some((o) => o.value === want)) select.value = want;
@@ -250,7 +254,39 @@ export async function fillMicrophones(select) {
     select.dataset.wired = '1';
     select.addEventListener('change', () => {
       try { localStorage.setItem(MIC_KEY, select.value); } catch { /* not remembered */ }
+      if (select.micAdvice) select.micAdvice();
     });
   }
+  if (advice) {
+    select.micAdvice = () => showMicAdvice(select, advice, mics);
+    select.micAdvice();
+  }
   return select.value;
+}
+
+/** Steer away from a wireless microphone, offering the built-in one if there is one. */
+function showMicAdvice(select, advice, mics) {
+  const label = select.selectedOptions[0]?.textContent || '';
+  const reason = wirelessMicReason(label);
+  advice.replaceChildren();
+  if (!reason) return;
+  const builtIn = builtInMicrophone(mics);
+  const note = el('p', { class: 'note warn' },
+    `"${label}" looks like ${reason}. Wireless microphones hear 100–200 ms late, several times more than `
+    + 'any TinCAN timing profile allows, and are rarely next to this computer\'s speaker. '
+    + (builtIn ? '' : 'Choose this computer\'s built-in microphone, here or in the system sound settings.'));
+  if (builtIn) {
+    if (select.disabled) {
+      note.append(`Stop, choose "${builtIn.label}", and start again.`);
+    } else {
+      note.append(el('button', {
+        style: 'margin-left:.4rem',
+        onclick: () => {
+          select.value = builtIn.deviceId;
+          select.dispatchEvent(new Event('change'));
+        },
+      }, `Use ${builtIn.label}`));
+    }
+  }
+  advice.append(note);
 }

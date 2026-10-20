@@ -149,3 +149,24 @@ test('two devices close together in a dead room pass every check', () => {
   for (const c of a.general) assert.equal(c.ok, true, `${c.name}: ${c.detail}`);
   for (const c of a.profiles.find((p) => p.profile === 'T25').checks) assert.equal(c.ok, true, `T25 ${c.name}: ${c.detail}`);
 });
+
+test('a delay no profile can absorb is called out, with the usual cause', () => {
+  // The figures from a real report: a Mac recording through an iPhone 16 over
+  // Continuity heard itself 169 ms late.
+  const self = analyseSelf(record({ latencyMs: 168.7, gain: 0.01 }), FS);
+  assert.ok(Math.abs(self.latency * 1000 - 168.7) < 0.5, `latency ${self.latency * 1000} ms`);
+
+  const a = assess(self, null, { microphone: '2024 iPhone 16 Microphone' });
+  assert.equal(general(a, 'latency').ok, false);
+  assert.match(general(a, 'latency').detail, /longer than any profile allows \(T10.*55 ms\)/);
+  assert.match(general(a, 'latency').detail, /built-in microphone/);
+  assert.equal(general(a, 'microphone').ok, false);
+  assert.match(general(a, 'microphone').detail, /iPhone 16/);
+  for (const p of a.profiles) assert.equal(p.checks.find((c) => c.name === 'latency').ok, false, p.profile);
+});
+
+test('a built-in microphone with a short delay raises neither warning', () => {
+  const a = assess(analyseSelf(record({ latencyMs: 12, gain: 0.5 }), FS), null, { microphone: 'MacBook Pro Microphone' });
+  assert.equal(general(a, 'latency').ok, true);
+  assert.equal(general(a, 'microphone'), undefined);
+});

@@ -19,6 +19,7 @@
  */
 
 import { BANDS, PROFILES, DETECTOR_DEFAULTS, timing, nearFarMarginDb } from '../../src/tincan/params.js';
+import { wirelessMicReason } from '../../src/tincan/modem.js';
 
 /** Peak output level: the Console's default transmit level. */
 export const AMPLITUDE = 0.25;
@@ -330,11 +331,21 @@ const db = (ratio) => 20 * Math.log10(ratio);
 /**
  * What the measurements mean for each bit-timing profile. `peer` is optional:
  * without it the checks that need another device are reported as not run.
+ * `microphone` is the capture device's label, when known.
  *
  * Each check is { name, ok: true|false|null, detail }; null means unknown.
  */
-export function assess(self, peer = null) {
+export function assess(self, peer = null, { microphone = '' } = {}) {
   const general = [];
+  const wireless = wirelessMicReason(microphone);
+  if (wireless) {
+    general.push({
+      name: 'microphone',
+      ok: false,
+      detail: `"${microphone}" looks like ${wireless}. Wireless microphones hear 100–200 ms late and are `
+        + 'seldom next to this computer\'s speaker. Choose the built-in microphone and measure again.',
+    });
+  }
   general.push({
     name: 'hears itself',
     ok: !!self.heard,
@@ -343,6 +354,22 @@ export function assess(self, peer = null) {
         + `${Math.min(99, db(self.profiles.T25.steady / self.profiles.T25.noise)).toFixed(0)} dB above the noise`
       : 'the test signal never reached the microphone: speaker muted or too quiet, or echo cancellation removed it. A node that cannot hear itself cannot arbitrate or monitor its own bits.',
   });
+
+  if (self.heard) {
+    const limits = profileTiming(48000).map((p) => [p.key, p.latencyLimit]);
+    const [slowest, most] = limits.reduce((a, b) => (b[1] > a[1] ? b : a));
+    const ms = self.latency * 1000;
+    general.push({
+      name: 'latency',
+      ok: self.latency < most,
+      detail: self.latency < most
+        ? `${ms.toFixed(1)} ms from speaker to microphone; see each profile below for whether that is short enough`
+        : `${ms.toFixed(1)} ms from speaker to microphone, longer than any profile allows (${slowest}, the most `
+          + `tolerant, allows ${(most * 1000).toFixed(0)} ms), so no setting will work. Delays this long `
+          + `usually mean a wireless microphone — an iPhone through Continuity, AirPods, a Bluetooth headset — `
+          + `or heavy audio processing. Use the computer's built-in microphone and measure again.`,
+    });
+  }
 
   let selfGainDb = null;
   if (self.heard && peer && peer.heard) selfGainDb = db(self.profiles.T25.steady / peer.profiles.T25.steady);

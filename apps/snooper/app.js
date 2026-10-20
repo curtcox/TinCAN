@@ -46,7 +46,7 @@ function describePhy() {
 bandSel.addEventListener('change', describePhy);
 profSel.addEventListener('change', describePhy);
 describePhy();
-fillMicrophones($('#mic'));
+fillMicrophones($('#mic'), $('#micadvice'));
 
 const support = checkSupport();
 if (!support.ok) {
@@ -87,11 +87,12 @@ $('#start').addEventListener('click', async () => {
     });
     wire(modem);
     await modem.start();
-    fillMicrophones($('#mic'));
+    fillMicrophones($('#mic'), $('#micadvice'));
     const input = modem.diagnostics().input;
     if (input) errLog.add(`<span class="muted">microphone: ${escapeHtml(input.label || 'unnamed')}</span>`);
     startedAt = performance.now() / 1000;
     bandSel.disabled = profSel.disabled = $('#mic').disabled = true;
+    $('#mic').micAdvice?.();
     $('#stop').disabled = false;
     setState('listening', 'live');
   } catch (err) {
@@ -105,6 +106,7 @@ $('#stop').addEventListener('click', async () => {
   if (modem) await modem.stop();
   modem = null;
   bandSel.disabled = profSel.disabled = $('#mic').disabled = false;
+  $('#mic').micAdvice?.();
   $('#start').disabled = false;
   $('#stop').disabled = true;
   setState('stopped');

@@ -179,6 +179,13 @@ export class Modem extends EventTarget {
           `request to turn it off. Arbitration and bit monitoring will be unreliable.`);
       }
     }
+    const wireless = track && wirelessMicReason(track.label);
+    if (wireless) {
+      this.warnings.push(
+        `The microphone "${track.label}" looks like ${wireless}. Wireless microphones hear 100–200 ms `
+        + 'late, far later than any TinCAN timing profile allows, so this node will misread its own bits. '
+        + 'Leave, choose this computer\'s built-in microphone, and join again.');
+    }
     if (this.warnings.length) {
       this.dispatchEvent(new CustomEvent('warning', { detail: { warnings: this.warnings } }));
     }
@@ -277,4 +284,26 @@ export async function listMicrophones() {
   return devices
     .filter((d) => d.kind === 'audioinput')
     .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `microphone ${i + 1}` }));
+}
+
+/**
+ * Why a microphone, judged by its label, is probably wireless, or null.
+ *
+ * A wireless microphone (an iPhone used through macOS Continuity, AirPods, any
+ * Bluetooth headset) delays what it hears by 100–200 ms, several times more
+ * than any TinCAN profile tolerates (spec §5.6), and is seldom anywhere near
+ * this computer's speaker. Labels are all a page can see, so this is a guess.
+ */
+export function wirelessMicReason(label) {
+  const l = String(label || '');
+  if (/\biphone\b|\bipad\b|continuity/i.test(l)) return 'a phone or tablet used as a wireless microphone';
+  if (/airpods|beats|\bbuds\b|bluetooth|hands-?free|\bBT\b/i.test(l)) return 'a Bluetooth microphone';
+  return null;
+}
+
+/** The microphone most likely to be built into this computer, or null. */
+export function builtInMicrophone(mics) {
+  return mics.find((m) => m.deviceId !== 'default'
+    && /built-?in|internal|macbook|imac|laptop|\bintegrated\b/i.test(m.label)
+    && !wirelessMicReason(m.label)) || null;
 }
