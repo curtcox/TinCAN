@@ -230,32 +230,28 @@ test('two Consoles talk when each hears itself 20× louder than the other and cl
   assertConversed(ada, bob);
 });
 
-test('a Console whose microphone delivers nothing for its first 0.2 s still transmits',
-  { todo: 'the noise-floor estimate primes on the silence, locks at zero, and every later window reads as carrier, so the bus never looks idle' },
-  () => {
-    // Capture devices take a moment to start, and until they do the worklet's
-    // input has no channels at all.
-    const ada = consoleNode({ name: 'ada', address: 3 });
-    const bob = consoleNode({ name: 'bob', address: 12, micAfter: 0.2 });
-    const run = room([ada, bob]);
+test('a Console whose microphone delivers nothing for its first 0.2 s still transmits', () => {
+  // Capture devices take a moment to start, and until they do the worklet's
+  // input has no channels at all.
+  const ada = consoleNode({ name: 'ada', address: 3 });
+  const bob = consoleNode({ name: 'bob', address: 12, micAfter: 0.2 });
+  const run = room([ada, bob]);
 
-    run(1);
-    converse(run, ada, bob);
+  run(1);
+  converse(run, ada, bob);
 
-    assertConversed(ada, bob);
+  assertConversed(ada, bob);
+});
+
+test('a Console recovers from its microphone dropping out for three seconds', () => {
+  const ada = consoleNode({ name: 'ada', address: 3 });
+  const bob = consoleNode({ name: 'bob', address: 12 });
+  const run = room([ada, bob], {
+    shape: (i, x, t) => (i === 1 && t >= 2 && t < 5 ? 0 : x),
   });
 
-test('a Console recovers from its microphone dropping out for three seconds',
-  { todo: 'the noise-floor estimate decays toward zero during the dropout and then reads every window as carrier' },
-  () => {
-    const ada = consoleNode({ name: 'ada', address: 3 });
-    const bob = consoleNode({ name: 'bob', address: 12 });
-    const run = room([ada, bob], {
-      shape: (i, x, t) => (i === 1 && t >= 2 && t < 5 ? 0 : x),
-    });
+  run(6);
+  converse(run, ada, bob);
 
-    run(6);
-    converse(run, ada, bob);
-
-    assertConversed(ada, bob);
-  });
+  assertConversed(ada, bob);
+});

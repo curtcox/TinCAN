@@ -49,9 +49,16 @@ export const DETECTOR_DEFAULTS = {
   hopsPerTq: 4,
   /**
    * Time constant of the noise-floor estimator, in bit times. The estimator
-   * is frozen while a carrier is present (spec §4.4).
+   * is frozen while a transmission is present (spec §4.4.1).
    */
   noiseTauBits: 4,
+  /**
+   * A carrier must put more than this many times the guard-bin power into the
+   * two tone bins. Below it the energy is broadband, so it is noise, and the
+   * noise floor keeps tracking it (spec §4.4.1). White noise sits near 2; a
+   * tone, even in the 2 ms edge window of T100, stays above 7.
+   */
+  toneToGuard: 4,
   /** Consecutive dominant hops required before an edge is declared. */
   edgeDebounceHops: 2,
 };

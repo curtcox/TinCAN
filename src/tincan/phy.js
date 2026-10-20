@@ -93,6 +93,9 @@ export class Phy {
     this.noiseAlpha = 1 - Math.exp(-this.hopSamples
       / (DETECTOR_DEFAULTS.noiseTauBits * this.bitSamples));
     this.noisePrimed = false;
+    // Fraction of recent carrier hops that were broadband, over about a bit.
+    this.broadband = 0;
+    this.broadbandAlpha = 1 - Math.exp(-this.hopSamples / this.bitSamples);
     this.edgeRun = 0;
 
     const k = (f) => 2 * Math.cos((2 * Math.PI * f) / fs);
@@ -228,17 +231,22 @@ export class Phy {
     if (this.n < this.edgeSamples) return;
     const m = this._measure(this.edgeSamples, this.winEdge, this.noiseEst);
 
-    // Track the floor only while the channel is quiet. The edge window is short
+    // Track the floor while the channel is quiet. The edge window is short
     // enough that a tone's main lobe reaches the guard bins, so updating during
-    // a carrier would inflate the floor and desensitise the detector.
-    if (!m.carrier) {
-      const g = this._guard();
-      if (!this.noisePrimed) {
-        this.noiseEst = this.noiseEst === 0 ? g : this.noiseEst + this.noiseAlpha * (g - this.noiseEst);
-        if (this.n > 8 * this.edgeSamples) this.noisePrimed = true;
-      } else {
-        this.noiseEst += this.noiseAlpha * (g - this.noiseEst);
-      }
+    // a carrier would inflate the floor and desensitise the detector — unless
+    // the "carrier" has been broadband for most of the last bit time, which no
+    // transmission is: that is noise the estimate has fallen behind, most
+    // often because the microphone delivered silence for a while (§4.4.1).
+    // Transmissions look broadband too, but only for the few hops in which a
+    // window straddles a tone switching on or off.
+    const g = this._guard();
+    const broadband = m.carrier && g * DETECTOR_DEFAULTS.toneToGuard >= m.total;
+    this.broadband = m.carrier ? this.broadband + this.broadbandAlpha * ((broadband ? 1 : 0) - this.broadband) : 0;
+    if (!m.carrier || (broadband && this.broadband > 0.5)) {
+      // An estimate of exactly zero has only ever seen digital silence: seed
+      // it from the first real reading rather than creeping up from nothing.
+      this.noiseEst = this.noiseEst === 0 ? g : this.noiseEst + this.noiseAlpha * (g - this.noiseEst);
+      if (!this.noisePrimed && this.n > 8 * this.edgeSamples) this.noisePrimed = true;
     }
 
     // Debounce: a single noisy hop must not be able to restart the bit clock.

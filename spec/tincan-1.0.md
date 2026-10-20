@@ -225,17 +225,35 @@ several times a second and will never keep a bit clock. Implementations MUST
 smooth it:
 
 ```
-if not carrier:
+if not carrier or noise_carrier:
     N  <-  N + alpha * ( (N_lo + N_hi)/2 - N )
 ```
 
 with `alpha` corresponding to a time constant of **at least 2 bit times**
-(4 bit times RECOMMENDED).
+(4 bit times RECOMMENDED). An estimate that has only ever seen digital silence
+(`N = 0`) SHOULD be seeded from the first non-zero reading instead.
 
-The estimate MUST be frozen while a carrier is present. Guard frequencies sit
-500 Hz from the tones, which is inside the main lobe of a short detection window,
-so a transmission would otherwise inflate the estimated floor and desensitise the
-detector for as long as the frame lasts.
+The estimate MUST be frozen while a transmission is present. Guard frequencies
+sit 500 Hz from the tones, which is inside the main lobe of a short detection
+window, so a transmission would otherwise inflate the estimated floor and
+desensitise the detector for as long as the frame lasts.
+
+It MUST NOT be frozen by noise, though, and a frozen estimate can fall behind the
+noise. A microphone that delivers digital silence — while the capture device
+starts, or when it drops out — drives `N` to zero or near it, and when sound
+returns every window then exceeds `kappa * N`. The node reads carrier forever,
+never sees the bus idle (§4.5), and never transmits. A tone puts most of its
+energy in its own bin and little in the guard bins; noise puts about as much in
+each. So a "carrier" is treated as noise, `noise_carrier`, when
+
+```
+E_R + E_D  <=  4 * (N_lo + N_hi)/2
+```
+
+and that has held for most of the last bit time. A tone stays above 7 times the
+guard power even in the shortest edge window (T100's 2 ms); white noise sits
+near 2. The bit-time requirement matters: a window that straddles a tone
+switching on or off is briefly broadband too.
 
 An implementation using two window lengths — a short one for edge timing and
 `W` for the sample point (§5.5) — may track one estimate and scale it between
