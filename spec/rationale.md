@@ -150,6 +150,16 @@ is 13 m — comfortably outside the arbitration range limit, so the ACK slot is
 never the binding constraint. Making it two bits rather than making the whole bit
 time longer keeps the bit rate where it is.
 
+The transmitter is silent for both bits rather than emitting recessive, as a CAN
+transmitter would. On a wire, recessive is the absence of drive and costs a
+listener nothing. Over air, recessive is a tone, and the loudest tone at any
+node's microphone is its own. A transmitter that kept emitting `f_R` would need
+the acknowledgement to arrive within 8.6 dB of its own speaker (Part 1 §4.6),
+which a peer a metre away never does. Silence also means that a transmitter
+hears acknowledgements meant for someone else's frame when a near-far collision
+has hidden the overlap from it; Part 1 §6.7 and §9 below cover that
+cost.
+
 ## 6. Why CRC-17 and not CRC-15
 
 CAN's CRC-15 is dimensioned for frames up to 127 bits at a bit error rate that a
@@ -220,12 +230,17 @@ Worse, the severe case does not present as a collision at all. Past roughly a
 tone at its own microphone, so neither withdraws and neither sees a bit error;
 they transmit straight through each other. The near node's frame is
 acknowledged and completes, and from its point of view the bus is perfectly
-healthy. The far node's frame is acknowledged by nobody, it retries forever, and
-its retries land as stray dominant bits in other nodes' `EOF` fields. The
-signature is one node with only acknowledgement errors and no completed frames,
-alongside other nodes with a low rate of form errors and no other symptoms.
-Part 1 Appendix C.1 works this through; the reference implementation's test
-suite asserts it, because it was not what the first draft of the spec predicted.
+healthy. The far node's frame is received by nobody, but because a transmitter
+falls silent during `ACK` (§5 above), it hears the acknowledgements for the
+near node's frame and completes too. Both report success; one frame is lost and
+no counter anywhere records it. Part 1 Appendix C.1 works this through.
+
+An earlier draft kept the transmitter emitting recessive during `ACK`, and then
+this case was noisy: the far node's own tone masked the acknowledgements, so it
+saw acknowledgement errors and retried. But the same masking defeats every
+acknowledgement on real hardware, where a device's own speaker is 20–30 dB
+louder at its own microphone than any peer. A protocol that only reports near-far
+exclusion by never working at all was the wrong trade.
 
 **Audio I/O latency.** `t_slop` in Part 1 §5.6 is treated as a constant. On real
 systems it is neither constant nor accurately reported — Bluetooth adds 100–200

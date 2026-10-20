@@ -189,7 +189,9 @@ export class Protocol {
         return this.txItem ? this.txItem.tx.bits[this.txIndex] : null;
 
       case STATE.ACK:
-        if (this.txItem) return RECESSIVE;              // spec §6.7
+        // Spec §6.7: the transmitter falls silent, because its own recessive
+        // tone at its own microphone would bury the acknowledgers' dominant.
+        if (this.txItem) return null;
         return this.ackPending ? DOMINANT : null;
 
       case STATE.ERROR_FLAG:

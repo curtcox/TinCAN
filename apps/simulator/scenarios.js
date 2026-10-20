@@ -72,9 +72,10 @@ export const SCENARIOS = {
       'The far node holds the lower identifier and ought to win. It is 25× further away than '
       + 'the near node, well outside the ' + nearFarMarginDb().toFixed(1) + ' dB margin of §4.6, '
       + 'so each node\'s own recessive tone buries the other\'s dominant tone. Neither withdraws. '
-      + 'The near node\'s frame is delivered and it never learns anything went wrong; the far '
-      + 'node is never acknowledged, retries forever, and its retries leave stray dominant bits '
-      + 'in everyone else\'s EOF. This is what a badly-planned segment looks like.',
+      + 'The near node\'s frame is delivered. The far node\'s frame reaches nobody, but the far '
+      + 'node is silent during ACK (§6.7), hears the acknowledgements meant for the near node\'s '
+      + 'frame, and completes anyway: both report success and one frame is silently lost. This '
+      + 'is what a badly-planned segment looks like.',
     nodes: [
       { name: 'primer', x: 1.0, y: 0 },
       { name: 'near', x: 0.15, y: 0 },

@@ -119,7 +119,7 @@ Two consequences follow, and everything else in TinCAN is built on them.
    observes dominant knows, without any negotiation, that some other node is
    transmitting and that the other node's bit is `0` where its own was `1`.
 2. **A receiver can inject one bit into someone else's frame.** A node that
-   transmits dominant during a slot that the frame's transmitter left recessive
+   transmits dominant during a slot that the frame's transmitter left open
    changes what the transmitter reads back. This is how acknowledgement (§6.7)
    and error signalling (§8) work with no reverse channel and no extra frames.
 
@@ -137,7 +137,8 @@ bit time it transmits:
 | Recessive (`1`) | `f_R` |
 | Dominant (`0`) | `f_D` |
 
-An idle node emits nothing.
+An idle node emits nothing. The one exception inside a frame is the `ACK` field,
+during which the frame's own transmitter emits nothing either (§6.7).
 
 The wired-AND rule is realised by **energy detection at `f_D`**: the presence of
 the dominant tone is what makes the bus dominant, and no combination of recessive
@@ -345,16 +346,18 @@ qualitatively different happens: **each node's own recessive tone buries the
 other's dominant tone at its own microphone**, so *neither* withdraws and neither
 detects a bit error. Both transmit complete frames straight through each other.
 The near node's frame is received and acknowledged normally by everyone that can
-hear it; the far node's frame is acknowledged by nobody, so it retries, goes
-error-passive, and its retransmissions arrive as dominant bits in the middle of
-other nodes' `EOF` and interframe space, producing a steady trickle of form
-errors at the nodes that *are* working.
+hear it. The far node's frame is received by nobody — but because a transmitter
+is silent during `ACK` (§6.7), the far node hears the acknowledgements meant for
+the near node's frame and **completes as though its own frame had been
+delivered**.
 
-The signature to look for is therefore: **one node accumulating acknowledgement
-errors and never completing a frame, while other nodes accumulate form errors
-and complete theirs normally.** That is a near-far exclusion, not interference,
-and no amount of retrying fixes it — the far node must move closer or the
-segment must be re-planned. An analyzer SHOULD display received level per source
+Severe near-far exclusion is therefore **silent**: both transmitters report
+success and one frame is lost. Neither node's counters show anything. The only
+evidence is at the application layer — a frame that was sent and never arrived —
+and at an analyzer, which decodes one frame where two transmitters each claim to
+have sent one. That is a near-far exclusion, not interference, and no amount of
+retrying fixes it — the far node must move closer or the segment must be
+re-planned. An analyzer SHOULD display received level per source
 so this is diagnosable rather than mysterious.
 
 ### 4.7 Reverberation
@@ -562,7 +565,7 @@ noise than a protocol violation.
 | `DATA` | 8 × *n* | payload, byte 0 first, MSB first | yes | yes |
 | `CRC` | 17 | §6.10 | yes | no |
 | `CRC_DELIM` | 1 | `1` | no | no |
-| `ACK` | 2 | transmitter `11`, receivers assert `00` | no | no |
+| `ACK` | 2 | transmitter silent, receivers assert `00` | no | no |
 | `ACK_DELIM` | 1 | `1` | no | no |
 | `EOF` | 7 | `1111111` | no | no |
 
@@ -584,7 +587,7 @@ noise than a protocol violation.
 | `DATA` | 8 × *n* | payload | yes | yes |
 | `CRC` | 17 | §6.10 | yes | no |
 | `CRC_DELIM` | 1 | `1` | no | no |
-| `ACK` | 2 | transmitter `11`, receivers assert `00` | no | no |
+| `ACK` | 2 | transmitter silent, receivers assert `00` | no | no |
 | `ACK_DELIM` | 1 | `1` | no | no |
 | `EOF` | 7 | `1111111` | no | no |
 
@@ -636,10 +639,24 @@ REQUIRED for reception. At most 2 consecutive overload frames may be generated.
 
 The `ACK` field is **two bit times long**, unlike CAN's one.
 
-The transmitter emits recessive for both. Every node that received the frame with
-a valid CRC and a valid form up to the CRC delimiter MUST emit dominant for both
-`ACK` bits. The transmitter samples the `ACK` field at the sample point of the
-**second** `ACK` bit.
+The transmitter MUST emit no tone for both `ACK` bits. Every node that received
+the frame with a valid CRC and a valid form up to the CRC delimiter MUST emit
+dominant for both `ACK` bits. The transmitter samples the `ACK` field at the
+sample point of the **second** `ACK` bit, where it reads dominant if any
+acknowledgement arrived and recessive (no carrier) otherwise.
+
+The transmitter falls silent because its own speaker is by far the loudest
+source at its own microphone — typically 20–30 dB louder than a peer a metre
+away. Were it to keep emitting `f_R`, the acknowledgers' dominant tone would have
+to arrive within the −8.6 dB margin of §4.6 *relative to the transmitter's own
+recessive tone*, which on ordinary hardware it never does: every frame would end
+in an acknowledgement error no matter who was listening. With the transmitter
+silent, the acknowledgement need only clear the carrier threshold.
+
+This has a cost. An acknowledgement says that *some* frame was received, not
+which one. A transmitter that has been excluded by a near-far collision (§4.6),
+and whose frame nobody received, now hears the acknowledgements for the frame
+that was received, and completes as though its own had been.
 
 The field is doubled because an acknowledging node's bit clock is offset from the
 transmitter's by one propagation delay, and the node cannot begin its dominant
@@ -764,8 +781,8 @@ recessive bits do not disturb the winner's dominant bits, the winner's frame is
 undamaged. This is the whole point of the exercise.
 
 After the arbitration field ends, a transmitted-recessive/read-dominant mismatch
-is no longer arbitration loss — it is a bit error, except in the `ACK` field
-where it is the expected outcome.
+is no longer arbitration loss — it is a bit error. The `ACK` field is exempt: the
+transmitter is silent there (§6.7) and dominant is the expected outcome.
 
 ### 7.3 Priority semantics
 
@@ -1054,14 +1071,11 @@ What happens next is the part worth internalising:
   strongly than node 3, decodes node 1's frame, and acknowledges it. Node 1 sees
   the acknowledgement and completes normally. Nothing tells node 1 that anything
   went wrong.
-- **Node 3's frame is delivered to nobody.** No node hears it well enough over
-  node 1's simultaneous transmission to validate its CRC, so nobody acknowledges.
-  Node 3 signals an acknowledgement error, retransmits, fails again, and climbs
-  towards error-passive (§8.3) without ever reaching bus-off, because its errors
-  are acknowledgement errors.
-- **Node 3's retries damage other nodes' frames.** Its dominant bits land in the
-  `EOF` and interframe space of whatever is on the bus at the time, so nodes 1
-  and 2 log form errors at a low rate while otherwise working fine.
+- **Node 3's frame is delivered to nobody, and node 3 does not know.** No node
+  hears it well enough over node 1's simultaneous transmission to validate its
+  CRC. But node 3 is silent during `ACK` (§6.7), so it hears node 2
+  acknowledging node 1's frame, takes that as its own acknowledgement, and
+  completes. It does not retry. The frame is simply gone.
 
 The net effect is that node 3 is **excluded from the bus** rather than colliding
 with it. This is the failure mode the range limit exists to prevent, and it is
