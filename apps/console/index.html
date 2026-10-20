@@ -49,6 +49,7 @@
         <label class="field"><span>Bit timing</span><select id="profile"></select></label>
         <label class="field"><span>Transmit level <b id="ampval">25%</b></span>
           <input id="amp" type="range" min="2" max="60" value="25"></label>
+        <label class="field"><span>Microphone</span><select id="mic"></select></label>
         <p class="note" id="phynote"></p>
       </div>
 
@@ -70,6 +71,38 @@
           <div class="stat"><span>REC</span><b id="crec">0</b></div>
           <div class="stat"><span>errors</span><b id="cerr">0</b></div>
         </div>
+        <div class="stats" style="margin-top:.8rem">
+          <div class="stat" title="this node read back a different level from the one it sent"><span>bit</span><b id="cbit">0</b></div>
+          <div class="stat" title="six identical bits in a row"><span>stuff</span><b id="cstuff">0</b></div>
+          <div class="stat" title="the checksum did not match"><span>CRC</span><b id="ccrc">0</b></div>
+          <div class="stat" title="a fixed-format field had the wrong level"><span>form</span><b id="cform">0</b></div>
+          <div class="stat" title="nobody acknowledged a frame this node sent"><span>ACK</span><b id="cack">0</b></div>
+          <div class="stat" title="a frame start that turned out to be noise"><span>abandoned</span><b id="caband">0</b></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="row" style="margin-bottom:.6rem">
+          <h2 style="margin:0">Signal</h2>
+          <span class="spacer"></span>
+          <span id="audiostate" class="pill">no audio</span>
+          <span id="carrier" class="pill">no carrier</span>
+        </div>
+        <canvas id="meter" height="110"></canvas>
+        <div class="stats" style="margin-top:.8rem">
+          <div class="stat"><span>E_D / total</span><b id="sratio">—</b></div>
+          <div class="stat"><span>recessive</span><b id="ser">—</b></div>
+          <div class="stat"><span>dominant</span><b id="sed">—</b></div>
+          <div class="stat"><span>noise floor</span><b id="snf">—</b></div>
+        </div>
+        <canvas id="bits" height="70" style="margin-top:.8rem"></canvas>
+        <p class="note">
+          One column per bit, newest on the right: <span class="dom">■</span> dominant,
+          <span class="rec">■</span> recessive, <span class="muted">■</span> no carrier; height is the
+          dominant fraction and the dashed line <code>theta_D</code>. A <span style="color:var(--bad)">■</span>
+          on top marks a bit this node sent and heard back as the other level — expected when it loses
+          arbitration, a fault anywhere else.
+        </p>
       </div>
     </div>
 
@@ -116,9 +149,58 @@
         <div class="row" style="margin-bottom:.75rem">
           <h2 style="margin:0">Bus log</h2>
           <span class="spacer"></span>
+          <label class="row tight" style="font-size:.8rem;color:var(--dim)">
+            <input type="checkbox" id="shownoise" style="width:auto"> show noise events</label>
           <button id="clearlog" class="danger">Clear</button>
         </div>
         <div class="log" id="log" style="max-height:22rem"></div>
+      </div>
+
+      <div class="panel">
+        <div class="row" style="margin-bottom:.75rem">
+          <h2 style="margin:0">Diagnostics</h2>
+          <span class="spacer"></span>
+          <a href="../selftest/">self-test and microphone check</a>
+          <button id="report">Download report</button>
+        </div>
+        <div class="stats">
+          <div class="stat"><span>sample rate</span><b id="dfs">—</b></div>
+          <div class="stat" title="output plus input latency as the browser reports it; the self-test measures the real figure"><span>reported latency</span><b id="dlat">—</b></div>
+          <div class="stat" title="arbitration range for this profile, allowing for the reported latency"><span>range</span><b id="drange">—</b></div>
+          <div class="stat"><span>bits seen</span><b id="dbits">0</b></div>
+          <div class="stat"><span>overloads</span><b id="dover">0</b></div>
+          <div class="stat" title="the audio thread stopped reporting"><span>stalls</span><b id="dstall">0</b></div>
+        </div>
+        <p class="note" id="dinput">Microphone details appear once the node has joined.</p>
+
+        <h3 style="margin:1.2rem 0 .4rem;font-size:.9rem">Detector</h3>
+        <label class="field"><span>Dominant threshold <code>theta_D</code> <b id="thetaval"></b></span>
+          <input id="theta" type="range" min="2" max="50" step="1"></label>
+        <label class="field"><span>Carrier margin <code>kappa</code> <b id="kappaval"></b></span>
+          <input id="kappa" type="range" min="2" max="64" step="1"></label>
+        <div class="row">
+          <button id="detreset">Reset to spec defaults</button>
+          <span class="muted" style="font-size:.8rem">Every device on the bus should use the same values (spec §4.4.2).</span>
+        </div>
+
+        <details style="margin-top:1.2rem">
+          <summary><b>When two devices will not talk</b></summary>
+          <ul class="note" style="margin-top:.6rem">
+            <li><b>The self-test fails</b> — this browser cannot run a node; try another browser.</li>
+            <li><b>The microphone check says a device does not hear itself</b> — its speaker is muted or too
+              quiet, or echo cancellation is on. Nothing else will work until it does.</li>
+            <li><b>"no node acknowledged" on every frame</b> — the other device is not joined, is muted, is on a
+              different band or bit timing, or cannot hear this one. Watch its Signal panel while this one sends.</li>
+            <li><b>Bit errors on this node's own frames</b> — it hears itself too late or through too much echo.
+              Try T10, which tolerates more of both; the microphone check gives the figure.</li>
+            <li><b>The carrier pill never goes out, and the queue never empties</b> — the room is louder in the
+              TinCAN band than the detector expects, or another sound source is on these frequencies.</li>
+            <li><b>Collisions whenever both devices have something to send</b> — each hears itself too loudly
+              to hear the other's dominant bits (spec §4.6). Move the devices closer together, or wait for one to finish.</li>
+            <li><b>"delivered" here but nothing arrives there</b> — a false acknowledgement: in a reverberant room a
+              node can mistake its own echo for one. Compare counters on both devices, and use a deader room.</li>
+          </ul>
+        </details>
       </div>
     </div>
   </div>

@@ -10,7 +10,7 @@
 import { Modem, CAPTURE_CONSTRAINTS } from '../../src/tincan/modem.js';
 import { Session } from '../../src/tincan/transport.js';
 import { formatFrame } from '../../src/tincan/frame.js';
-import { $, el, LogView, topbar, escapeHtml } from '../ui.js';
+import { $, el, LogView, topbar, escapeHtml, download, fillMicrophones } from '../ui.js';
 import {
   buildProbeSignal, analyseSelf, analysePeer, assess, RECORD_SECONDS, TONE_HZ,
 } from './probe.js';
@@ -29,8 +29,11 @@ $('#env').textContent = `${navigator.userAgent} — `
   + (typeof AudioWorkletNode === 'undefined' ? 'no AudioWorklet' : 'AudioWorklet available')
   + (window.isSecureContext ? ', secure context' : ', NOT a secure context');
 
+const results = { checks: [], self: null, peer: null, input: null, fs: null };
+
 function check(ok, text) {
   checks.add(`${ok ? '✓' : '✗'} ${escapeHtml(text)}`, ok ? '' : 'err');
+  results.checks.push({ ok, text });
   return ok;
 }
 
@@ -136,6 +139,7 @@ async function run() {
 
 $('#run').addEventListener('click', async () => {
   $('#run').disabled = true;
+  results.checks = [];
   checks.clear();
   log.clear();
   setVerdict('running…', 'live');
@@ -170,10 +174,16 @@ function setMicState(text, kind = '') {
  * the same capture constraints and kind of AudioContext the Console uses.
  */
 async function capture(signal, seconds) {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: CAPTURE_CONSTRAINTS });
+  const deviceId = $('#mic').value;
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: deviceId ? { ...CAPTURE_CONSTRAINTS, deviceId: { exact: deviceId } } : CAPTURE_CONSTRAINTS,
+  });
+  fillMicrophones($('#mic'));     // named now that access is granted
   const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
   try {
-    const settings = stream.getAudioTracks()[0]?.getSettings?.() || {};
+    const track = stream.getAudioTracks()[0];
+    const settings = track?.getSettings?.() || {};
+    results.input = { label: track?.label || '', settings };
     const ignored = ['echoCancellation', 'noiseSuppression', 'autoGainControl'].filter((k) => settings[k] === true);
     $('#micwarnings').replaceChildren(...ignored.map((k) => el('p', { class: 'note warn' },
       `${k} is still on: this browser ignored the request to turn it off, so these figures `
@@ -227,11 +237,14 @@ $('#measure').addEventListener('click', async () => {
   try {
     const { recording, fs, reported } = await capture(buildProbeSignal, RECORD_SECONDS);
     ownResult = analyseSelf(recording, fs);
+    results.self = ownResult;
+    results.fs = fs;
+    results.reportedLatency = reported;
     setMicState(ownResult.heard ? 'measured' : 'heard nothing', ownResult.heard ? 'ok' : 'bad');
     $('#micsummary').textContent = ownResult.heard
       ? `Speaker-to-microphone latency ${(ownResult.latency * 1000).toFixed(1)} ms`
         + (reported > 0 ? ` (the browser reports ${(reported * 1000).toFixed(1)} ms)` : '')
-        + ` at ${fs} Hz.`
+        + ` at ${fs} Hz, from ${results.input?.label || 'the default microphone'}.`
       : 'This device did not hear its own test signal.';
     render();
   } catch (err) {
@@ -252,6 +265,7 @@ $('#listen').addEventListener('click', async () => {
     const peer = analysePeer(recording, fs);
     if (peer.heard) {
       peerResult = peer;
+      results.peer = peer;
       setMicState('compared', 'ok');
     } else {
       setMicState('heard no other device', 'warn');
@@ -264,4 +278,25 @@ $('#listen').addEventListener('click', async () => {
     $('#measure').disabled = false;
     $('#listen').disabled = false;
   }
+});
+
+fillMicrophones($('#mic'));
+
+$('#report').addEventListener('click', () => {
+  const report = {
+    generated: new Date().toISOString(),
+    page: location.href,
+    userAgent: navigator.userAgent,
+    secureContext: window.isSecureContext,
+    audioWorklet: typeof AudioWorkletNode !== 'undefined',
+    selfTest: results.checks,
+    microphone: results.input,
+    sampleRate: results.fs,
+    reportedLatency: results.reportedLatency ?? null,
+    self: results.self,
+    peer: results.peer,
+    assessment: ownResult ? assess(ownResult, peerResult) : null,
+  };
+  download(`tincan-selftest-${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
+    JSON.stringify(report, null, 1), 'application/json');
 });

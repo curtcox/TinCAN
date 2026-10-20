@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { Modem, checkSupport, CAPTURE_CONSTRAINTS } from '../src/tincan/modem.js';
+import { Modem, checkSupport, listMicrophones, CAPTURE_CONSTRAINTS } from '../src/tincan/modem.js';
 
 /**
  * Install a fake browser. `settings` is what the capture track reports back;
@@ -18,6 +18,7 @@ import { Modem, checkSupport, CAPTURE_CONSTRAINTS } from '../src/tincan/modem.js
 function fakeBrowser({ settings = {}, suspended = false } = {}) {
   const calls = { constraints: null, modules: [], wiring: [], posted: [], tracksStopped: 0, closed: false };
   const track = {
+    label: 'Built-in Microphone',
     getSettings: () => ({ echoCancellation: false, noiseSuppression: false, autoGainControl: false, ...settings }),
     stop: () => { calls.tracksStopped++; },
   };
@@ -28,6 +29,8 @@ function fakeBrowser({ settings = {}, suspended = false } = {}) {
       calls.contextOptions = opts;
       this.state = 'suspended';
       this.sampleRate = 48000;
+      this.baseLatency = 0.005;
+      this.outputLatency = 0.02;
       this.destination = { label: 'speaker' };
       this.audioWorklet = { addModule: async (url) => { calls.modules.push(String(url)); } };
     }
@@ -53,7 +56,16 @@ function fakeBrowser({ settings = {}, suspended = false } = {}) {
   globalThis.AudioWorkletNode = AudioWorkletNode;
   Object.defineProperty(globalThis, 'navigator', {
     configurable: true,
-    value: { mediaDevices: { getUserMedia: async (c) => { calls.constraints = c; return stream; } } },
+    value: {
+      mediaDevices: {
+        getUserMedia: async (c) => { calls.constraints = c; return stream; },
+        enumerateDevices: async () => [
+          { kind: 'audioinput', deviceId: 'default', label: 'Built-in Microphone' },
+          { kind: 'audiooutput', deviceId: 'spk', label: 'Built-in Speakers' },
+          { kind: 'audioinput', deviceId: 'usb', label: '' },
+        ],
+      },
+    },
   });
   return calls;
 }
@@ -92,23 +104,21 @@ test('a browser that ignores the capture constraints is reported, not hidden', a
   assert.match(warnings[0], /echoCancellation/);
 });
 
-test('Modem.start does not report a running node while the AudioContext is still suspended',
-  { todo: 'start() resolves with the context suspended, so the Console says "on the bus" while the worklet never runs' },
-  async () => {
-    // Browsers keep a context suspended when they judge the page has no user
-    // activation. The Console creates its context only after awaiting the
-    // microphone permission prompt, which may leave it without one.
-    fakeBrowser({ suspended: true });
-    const modem = new Modem();
-    const warnings = [];
-    modem.on('warning', (e) => warnings.push(...e.detail.warnings));
+test('Modem.start does not report a running node while the AudioContext is still suspended', async () => {
+  // Browsers keep a context suspended when they judge the page has no user
+  // activation. The Console creates its context only after awaiting the
+  // microphone permission prompt, which may leave it without one.
+  fakeBrowser({ suspended: true });
+  const modem = new Modem();
+  const warnings = [];
+  modem.on('warning', (e) => warnings.push(...e.detail.warnings));
 
-    let started = true;
-    await modem.start().catch(() => { started = false; });
+  let started = true;
+  await modem.start().catch(() => { started = false; });
 
-    assert.ok(!started || warnings.some((w) => /suspend/i.test(w)),
-      'either start() rejects or it warns that audio is not running');
-  });
+  assert.ok(!started || warnings.some((w) => /suspend/i.test(w)),
+    'either start() rejects or it warns that audio is not running');
+});
 
 test('Modem.stop tells the worklet to stop, releases the microphone and closes the context', async () => {
   const calls = fakeBrowser();
@@ -132,4 +142,53 @@ test('checkSupport names an insecure page as the reason the microphone is unavai
   const s = checkSupport();
   assert.equal(s.ok, false);
   assert.match(s.problems.join('; '), /secure context/);
+});
+
+test('Modem.start captures from the chosen microphone, and lists the ones there are', async () => {
+  const calls = fakeBrowser();
+  await new Modem({ deviceId: 'usb' }).start();
+
+  assert.deepEqual(calls.constraints, { audio: { ...CAPTURE_CONSTRAINTS, deviceId: { exact: 'usb' } } });
+  assert.deepEqual(await listMicrophones(), [
+    { deviceId: 'default', label: 'Built-in Microphone' },
+    { deviceId: 'usb', label: 'microphone 2' },
+  ]);
+});
+
+test('Modem.diagnostics reports what the browser actually gave the node', async () => {
+  fakeBrowser({ settings: { sampleRate: 48000, latency: 0.01 } });
+  const modem = new Modem({ band: 'A', profile: 'T10' });
+  await modem.start();
+
+  const d = modem.diagnostics();
+  assert.equal(d.audioState, 'running');
+  assert.equal(d.sampleRate, 48000);
+  assert.equal(d.input.label, 'Built-in Microphone');
+  assert.equal(d.input.settings.echoCancellation, false);
+  assert.ok(d.measuredSlopMs > 30, `${d.measuredSlopMs} ms: 20 out, 10 in, and a quarter TQ`);
+  assert.ok(d.maxRange > 0);
+  assert.equal(d.profile, 'T10');
+});
+
+test('the Modem says when the audio thread stops reporting, and when it starts again', async () => {
+  fakeBrowser();
+  const modem = new Modem();
+  const seen = [];
+  modem.on('stalled', () => seen.push('stalled'));
+  modem.on('resumed', () => seen.push('resumed'));
+  await modem.start();
+
+  const t = modem.lastStatusAt;
+  modem._watch(t + 1000);
+  assert.deepEqual(seen, [], 'one quiet second is not a stall');
+  modem._watch(t + 2500);
+  assert.deepEqual(seen, ['stalled']);
+  modem._watch(t + 3500);
+  assert.deepEqual(seen, ['stalled'], 'said once');
+
+  modem._onMessage({ type: 'status', stats: {} });
+  modem._watch();
+  assert.deepEqual(seen, ['stalled', 'resumed']);
+  assert.equal(modem.diagnostics().stalled, false);
+  await modem.stop();
 });

@@ -30,6 +30,7 @@ const NAV = [
   ['apps/snooper/', 'Snooper'],
   ['apps/console/', 'Console'],
   ['apps/simulator/', 'Simulator'],
+  ['apps/selftest/', 'Self-test'],
 ];
 
 const PAGES = [

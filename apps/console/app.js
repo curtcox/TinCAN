@@ -3,14 +3,14 @@
  */
 
 import { Modem, checkSupport } from '../../src/tincan/modem.js';
-import { BANDS, PROFILES, timing, maxRange } from '../../src/tincan/params.js';
+import { BANDS, PROFILES, DETECTOR_DEFAULTS, timing, maxRange } from '../../src/tincan/params.js';
 import { buildTransmission, formatFrame } from '../../src/tincan/frame.js';
 import {
   Session, baseId, describeId, PRIO, TOPIC, segment,
 } from '../../src/tincan/transport.js';
 import {
-  $, el, hex, hexBytes, parseHexBytes, parseId,
-  LogView, topbar, escapeHtml,
+  $, el, hex, hexBytes, parseHexBytes, parseId, db, download,
+  LogView, topbar, escapeHtml, drawBits, drawMeter, fillMicrophones,
 } from '../ui.js';
 
 $('#chrome').replaceWith(topbar('Console'));
@@ -50,6 +50,29 @@ bandSel.addEventListener('change', describePhy);
 profSel.addEventListener('change', describePhy);
 describePhy();
 
+fillMicrophones($('#mic'));
+
+/* Detector thresholds (spec §4.4.2), adjustable for diagnosis. */
+const thetaIn = $('#theta');
+const kappaIn = $('#kappa');
+const thresholds = () => ({ thetaD: Number(thetaIn.value) / 100, kappa: Number(kappaIn.value) });
+function showThresholds() {
+  const { thetaD, kappa } = thresholds();
+  $('#thetaval').textContent = `${thetaD.toFixed(2)}${thetaD === DETECTOR_DEFAULTS.thetaD ? ' (default)' : ''}`;
+  $('#kappaval').textContent = `${kappa} (${(10 * Math.log10(kappa)).toFixed(1)} dB)`
+    + `${kappa === DETECTOR_DEFAULTS.kappa ? ' (default)' : ''}`;
+  if (modem) modem.setThresholds({ thetaD, kappa });
+}
+function resetThresholds() {
+  thetaIn.value = String(Math.round(DETECTOR_DEFAULTS.thetaD * 100));
+  kappaIn.value = String(DETECTOR_DEFAULTS.kappa);
+  showThresholds();
+}
+thetaIn.addEventListener('input', showThresholds);
+kappaIn.addEventListener('input', showThresholds);
+$('#detreset').addEventListener('click', resetThresholds);
+resetThresholds();
+
 $('#amp').addEventListener('input', (e) => {
   const v = Number(e.target.value) / 100;
   $('#ampval').textContent = `${e.target.value}%`;
@@ -72,6 +95,14 @@ let modem = null;
 let session = null;
 const peers = new Map();
 
+// Diagnostics: recent bits and events, for the Signal panel and the report.
+const bitHistory = [];
+const BIT_HISTORY = 900;
+const events = [];
+const EVENT_HISTORY = 1000;
+const diag = { stalls: 0, overloads: 0, carrierRun: 0, deafBits: 0, warned: new Set() };
+let lastStatus = null;
+
 const log = new LogView($('#log'), { limit: 500 });
 const chat = new LogView($('#chat'), { limit: 200 });
 
@@ -80,7 +111,7 @@ function setLive(live) {
   for (const s of txButtons) $(s).disabled = !live;
   $('#start').disabled = live;
   $('#stop').disabled = !live;
-  for (const s of ['#band', '#profile', '#address', '#callsign']) $(s).disabled = live;
+  for (const s of ['#band', '#profile', '#address', '#callsign', '#mic']) $(s).disabled = live;
 }
 
 /* ---------------------------------------------------------------- */
@@ -96,9 +127,13 @@ $('#start').addEventListener('click', async () => {
       mode: 'node',
       amplitude: Number($('#amp').value) / 100,
       name: $('#callsign').value || 'node',
+      deviceId: $('#mic').value || undefined,
+      ...thresholds(),
     });
     wire(modem);
     await modem.start();
+    fillMicrophones($('#mic'));     // now the browser will name them
+    showAudio();
 
     // The Session helper is written against the pure Protocol interface, so
     // give it the two methods it actually uses.
@@ -133,6 +168,7 @@ $('#stop').addEventListener('click', async () => {
   modem = null; session = null;
   setLive(false);
   setState('offline');
+  setAudioState('no audio');
 });
 
 $('#mute').addEventListener('click', () => {
@@ -154,12 +190,78 @@ function setState(text, kind = '') {
 /* modem events                                                      */
 /* ---------------------------------------------------------------- */
 
+function setAudioState(text, kind = '') {
+  $('#audiostate').textContent = text;
+  $('#audiostate').className = `pill ${kind}`;
+}
+
+function warnOnce(key, text) {
+  if (diag.warned.has(key)) return;
+  diag.warned.add(key);
+  $('#warnings').append(el('p', { class: 'note warn' }, text));
+  log.add(escapeHtml(text), 'warnrow');
+}
+
+/** What the browser gave this node: shown in Diagnostics, and in the report. */
+function showAudio() {
+  if (!modem) return;
+  const d = modem.diagnostics();
+  $('#dfs').textContent = d.sampleRate ? `${d.sampleRate} Hz` : '—';
+  $('#dlat').textContent = d.measuredSlopMs ? `${d.measuredSlopMs.toFixed(1)} ms` : '—';
+  $('#drange').textContent = d.maxRange !== null ? `${d.maxRange.toFixed(1)} m` : '—';
+  setAudioState(d.stalled ? 'audio stalled' : `audio ${d.audioState}`,
+    d.stalled || d.audioState !== 'running' ? 'bad' : 'ok');
+  if (d.input) {
+    const st = d.input.settings || {};
+    const flags = ['echoCancellation', 'noiseSuppression', 'autoGainControl']
+      .map((k) => `${k} ${st[k] === undefined ? 'not reported' : st[k] ? '<b>on</b>' : 'off'}`).join(', ');
+    $('#dinput').innerHTML = `Microphone: <b>${escapeHtml(d.input.label || 'unnamed')}</b>`
+      + (st.sampleRate ? `, ${st.sampleRate} Hz` : '') + (st.channelCount ? `, ${st.channelCount} channel` : '')
+      + `. ${flags}.`;
+  }
+}
+
 function wire(m) {
+  m.on('*', (e) => {
+    const d = e.detail;
+    events.push({
+      t: +(performance.now() / 1000).toFixed(3), event: d.event,
+      kind: d.kind, reason: d.reason, detail: d.detail, from: d.from, to: d.to, bit: d.bit,
+      id: d.frame ? d.frame.id : undefined,
+    });
+    if (events.length > EVENT_HISTORY) events.shift();
+  });
   m.on('warning', (e) => {
     for (const w of e.detail.warnings) $('#warnings').append(el('p', { class: 'note warn' }, w));
   });
-  m.on('ready', (e) => log.add(
-    `<span class="muted">audio at ${e.detail.sampleRate} Hz, ${e.detail.bitRate.toFixed(1)} bit/s</span>`));
+  m.on('audio-state', (e) => {
+    log.add(`audio context is now <b>${escapeHtml(e.detail.state)}</b>`, e.detail.state === 'running' ? '' : 'warnrow');
+    showAudio();
+  });
+  m.on('stalled', () => {
+    diag.stalls++;
+    $('#dstall').textContent = diag.stalls;
+    log.add('the audio thread has stopped reporting — this node can neither hear nor send. '
+      + 'Click the page; if that does not help, leave and join again.', 'err');
+    showAudio();
+  });
+  m.on('resumed', () => { log.add('the audio thread is running again'); showAudio(); });
+  m.on('abandoned', (e) => {
+    if ($('#shownoise').checked) {
+      log.add(`<span class="muted">noise: ${escapeHtml(e.detail.reason || 'abandoned')}</span>`);
+    }
+  });
+  m.on('overload', () => {
+    diag.overloads++;
+    $('#dover').textContent = diag.overloads;
+    log.add('overload frame', 'warnrow');
+  });
+  m.on('bus-off-recovered', () => log.add('recovered from bus-off', 'warnrow'));
+  m.on('ready', (e) => {
+    log.add(`<span class="muted">audio at ${e.detail.sampleRate} Hz, ${e.detail.bitRate.toFixed(1)} bit/s, `
+      + `${e.detail.bitSamples} samples per bit</span>`);
+    showAudio();
+  });
 
   m.on('tx-start', (e) => log.add(
     `→ transmitting ${escapeHtml(formatFrame(e.detail.frame))}`
@@ -220,7 +322,88 @@ function onStatus(s) {
   $('#cerr').textContent =
     (st.bitErrors || 0) + (st.crcErrors || 0) + (st.stuffErrors || 0)
     + (st.formErrors || 0) + (st.ackErrors || 0);
+  $('#cbit').textContent = st.bitErrors || 0;
+  $('#cstuff').textContent = st.stuffErrors || 0;
+  $('#ccrc').textContent = st.crcErrors || 0;
+  $('#cform').textContent = st.formErrors || 0;
+  $('#cack').textContent = st.ackErrors || 0;
+  $('#caband').textContent = st.framesAbandoned || 0;
+  $('#dbits').textContent = st.bitsObserved || 0;
+
+  lastStatus = s;
+  const sig = s.signal || {};
+  $('#sratio').textContent = sig.ratio !== undefined ? sig.ratio.toFixed(3) : '—';
+  $('#ser').textContent = `${db(sig.eR)} dB`;
+  $('#sed').textContent = `${db(sig.eD)} dB`;
+  $('#snf').textContent = `${db(sig.noise)} dB`;
+  $('#carrier').textContent = sig.carrier ? 'carrier' : 'no carrier';
+  $('#carrier').className = `pill ${sig.carrier ? 'live' : ''}`;
+  if (modem && $('#audiostate').textContent !== 'audio running' && !modem.stalled) showAudio();
+
+  for (const b of s.bits || []) {
+    bitHistory.push(b);
+    watchBit(b);
+  }
+  while (bitHistory.length > BIT_HISTORY) bitHistory.shift();
+  const th = thresholds();
+  drawBits($('#bits'), bitHistory, { thetaD: th.thetaD, markTx: true });
+  drawMeter($('#meter'), sig, { thetaD: th.thetaD });
 }
+
+/**
+ * Symptoms that the counters alone do not make obvious, each named once.
+ */
+function watchBit(b) {
+  // A legitimate frame is never more than about 700 bits of unbroken carrier.
+  diag.carrierRun = b.carrier ? diag.carrierRun + 1 : 0;
+  if (diag.carrierRun === 700) {
+    warnOnce('carrier', 'There has been carrier for 700 bit times without a break, longer than any frame. '
+      + 'The room is too loud in the TinCAN band, or something else is sounding on it, so this node never sees '
+      + 'the bus idle and cannot send.');
+  }
+  // While sending, a node must hear itself: no carrier on its own bits means it cannot.
+  if (b.tx !== null && b.tx !== undefined) {
+    diag.deafBits = b.carrier ? 0 : diag.deafBits + 1;
+    if (diag.deafBits === 16) {
+      warnOnce('deaf', 'This node is transmitting but hearing no carrier on its own bits. Its speaker may be '
+        + 'muted or too quiet, or echo cancellation is removing its own signal. Run the microphone check on the self-test page.');
+    }
+  }
+}
+
+window.addEventListener('resize', () => {
+  const th = thresholds();
+  drawBits($('#bits'), bitHistory, { thetaD: th.thetaD, markTx: true });
+  drawMeter($('#meter'), lastStatus?.signal || {}, { thetaD: th.thetaD });
+});
+drawBits($('#bits'), []);
+drawMeter($('#meter'), {});
+
+$('#report').addEventListener('click', () => {
+  const report = {
+    generated: new Date().toISOString(),
+    page: location.href,
+    userAgent: navigator.userAgent,
+    secureContext: window.isSecureContext,
+    config: {
+      callsign: $('#callsign').value,
+      address: Number($('#address').value),
+      band: bandSel.value,
+      profile: profSel.value,
+      amplitude: Number($('#amp').value) / 100,
+      microphone: $('#mic').selectedOptions[0]?.textContent || '',
+      ...thresholds(),
+    },
+    audio: modem ? modem.diagnostics() : null,
+    status: lastStatus && { ...lastStatus, bits: undefined },
+    diagnostics: { stalls: diag.stalls, overloads: diag.overloads, warned: [...diag.warned] },
+    peers: [...peers].map(([address, a]) => ({ address, callsign: a.callsign, version: a.version })),
+    events,
+    bits: bitHistory,
+  };
+  download(`tincan-console-${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
+    JSON.stringify(report, null, 1), 'application/json');
+});
 
 /* ---------------------------------------------------------------- */
 /* text                                                              */

@@ -53,6 +53,8 @@
     <div class="row">
       <button id="measure" class="primary">Measure this device</button>
       <button id="listen" disabled>Listen for the other device</button>
+      <label class="row tight" style="font-size:.85rem;color:var(--dim)">
+        Microphone <select id="mic" style="width:auto;max-width:14rem"></select></label>
       <span class="spacer"></span>
       <span id="micstate" class="pill">not run</span>
     </div>
@@ -61,7 +63,11 @@
   </div>
 
   <div class="panel">
-    <h2>What it means</h2>
+    <div class="row" style="margin-bottom:.75rem">
+      <h2 style="margin:0">What it means</h2>
+      <span class="spacer"></span>
+      <button id="report">Download report</button>
+    </div>
     <div id="verdicts" class="log" style="max-height:none"></div>
   </div>
 </main>

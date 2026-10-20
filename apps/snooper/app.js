@@ -6,9 +6,12 @@
  */
 
 import { Modem, checkSupport } from '../../src/tincan/modem.js';
-import { BANDS, PROFILES, timing, maxRange, DETECTOR_DEFAULTS } from '../../src/tincan/params.js';
+import { BANDS, PROFILES, timing, maxRange } from '../../src/tincan/params.js';
 import { describeId, describePci, TOPIC, parseBaseId } from '../../src/tincan/transport.js';
-import { $, el, hex, hexBytes, asciiBytes, LogView, topbar, escapeHtml, download, db } from '../ui.js';
+import {
+  $, el, hex, hexBytes, asciiBytes, LogView, topbar, escapeHtml, download, db,
+  drawBits as drawBitStrip, drawMeter as drawLevels, fillMicrophones,
+} from '../ui.js';
 
 $('#chrome').replaceWith(topbar('Snooper'));
 
@@ -43,6 +46,7 @@ function describePhy() {
 bandSel.addEventListener('change', describePhy);
 profSel.addEventListener('change', describePhy);
 describePhy();
+fillMicrophones($('#mic'));
 
 const support = checkSupport();
 if (!support.ok) {
@@ -79,11 +83,15 @@ $('#start').addEventListener('click', async () => {
       profile: profSel.value,
       mode: 'listener',
       name: 'snooper',
+      deviceId: $('#mic').value || undefined,
     });
     wire(modem);
     await modem.start();
+    fillMicrophones($('#mic'));
+    const input = modem.diagnostics().input;
+    if (input) errLog.add(`<span class="muted">microphone: ${escapeHtml(input.label || 'unnamed')}</span>`);
     startedAt = performance.now() / 1000;
-    bandSel.disabled = profSel.disabled = true;
+    bandSel.disabled = profSel.disabled = $('#mic').disabled = true;
     $('#stop').disabled = false;
     setState('listening', 'live');
   } catch (err) {
@@ -96,7 +104,7 @@ $('#start').addEventListener('click', async () => {
 $('#stop').addEventListener('click', async () => {
   if (modem) await modem.stop();
   modem = null;
-  bandSel.disabled = profSel.disabled = false;
+  bandSel.disabled = profSel.disabled = $('#mic').disabled = false;
   $('#start').disabled = false;
   $('#stop').disabled = true;
   setState('stopped');
@@ -114,6 +122,14 @@ function wire(m) {
       $('#warnings').append(el('p', { class: 'note warn' }, w));
     }
   });
+
+  m.on('stalled', () => {
+    errLog.add('the audio thread has stopped reporting — nothing is being heard. Click the page, or stop and start again.', 'err');
+    setState('audio stalled', 'bad');
+  });
+  m.on('resumed', () => { errLog.add('the audio thread is running again'); setState('listening', 'live'); });
+  m.on('audio-state', (e) => errLog.add(`audio context is now <b>${escapeHtml(e.detail.state)}</b>`,
+    e.detail.state === 'running' ? '' : 'warnrow'));
 
   m.on('ready', (e) => {
     errLog.add(`audio running at ${e.detail.sampleRate} Hz, `
@@ -292,96 +308,12 @@ function onStatus(s) {
   drawMeter(sig);
 }
 
-function fitCanvas(canvas) {
-  const dpr = window.devicePixelRatio || 1;
-  const w = canvas.clientWidth;
-  const h = canvas.clientHeight || parseInt(canvas.getAttribute('height'), 10);
-  if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
-  }
-  const ctx = canvas.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  return { ctx, w, h };
-}
-
-function cssVar(name) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
-
 function drawBits() {
-  const { ctx, w, h } = fitCanvas($('#bits'));
-  ctx.clearRect(0, 0, w, h);
-  const n = Math.max(1, Math.floor(w / 3));
-  const shown = bitHistory.slice(-n);
-  const bw = w / n;
-
-  const dom = cssVar('--dominant');
-  const rec = cssVar('--recessive');
-  const faint = cssVar('--faint');
-  const line = cssVar('--line');
-
-  for (let i = 0; i < shown.length; i++) {
-    const b = shown[i];
-    const x = i * bw;
-    const frac = Math.max(0.04, Math.min(1, b.ratio || 0));
-    const bh = Math.max(2, frac * (h - 10));
-    ctx.fillStyle = !b.carrier ? faint : (b.level === 0 ? dom : rec);
-    ctx.globalAlpha = b.carrier ? 1 : 0.35;
-    ctx.fillRect(x, h - bh - 4, Math.max(1, bw - 0.6), bh);
-  }
-  ctx.globalAlpha = 1;
-
-  // theta_D threshold line
-  const theta = DETECTOR_DEFAULTS.thetaD;
-  const ty = h - 4 - theta * (h - 10);
-  ctx.strokeStyle = line;
-  ctx.setLineDash([3, 3]);
-  ctx.beginPath();
-  ctx.moveTo(0, ty); ctx.lineTo(w, ty); ctx.stroke();
-  ctx.setLineDash([]);
+  drawBitStrip($('#bits'), bitHistory);
 }
 
 function drawMeter(sig) {
-  const { ctx, w, h } = fitCanvas($('#meter'));
-  ctx.clearRect(0, 0, w, h);
-
-  const dom = cssVar('--dominant');
-  const rec = cssVar('--recessive');
-  const line = cssVar('--line');
-  const dim = cssVar('--dim');
-
-  const pad = 34;
-  const barH = 16;
-  const toX = (v) => pad + Math.max(0, Math.min(1, (db(v) === '−∞' ? 0 : (60 + 10 * Math.log10(Math.max(v, 1e-12))) / 60))) * (w - pad - 8);
-
-  const rows = [
-    ['f_R', sig.eR || 0, rec],
-    ['f_D', sig.eD || 0, dom],
-    ['noise', sig.noise || 0, dim],
-  ];
-  ctx.font = '10px ui-monospace, monospace';
-  rows.forEach(([label, value, colour], i) => {
-    const y = 8 + i * (barH + 8);
-    ctx.fillStyle = dim;
-    ctx.fillText(label, 0, y + barH - 4);
-    ctx.fillStyle = line;
-    ctx.fillRect(pad, y, w - pad - 8, barH);
-    ctx.fillStyle = colour;
-    ctx.fillRect(pad, y, Math.max(1, toX(value) - pad), barH);
-  });
-
-  // ratio marker with the theta_D decision point
-  const y = 8 + 3 * (barH + 8);
-  const trackW = w - pad - 8;
-  ctx.fillStyle = dim;
-  ctx.fillText('E_D/Σ', 0, y + 10);
-  ctx.fillStyle = line;
-  ctx.fillRect(pad, y, trackW, 6);
-  ctx.fillStyle = (sig.ratio || 0) >= DETECTOR_DEFAULTS.thetaD ? dom : rec;
-  ctx.fillRect(pad, y, Math.max(1, (sig.ratio || 0) * trackW), 6);
-  ctx.fillStyle = dom;
-  ctx.fillRect(pad + DETECTOR_DEFAULTS.thetaD * trackW - 1, y - 3, 2, 12);
+  drawLevels($('#meter'), sig);
 }
 
 window.addEventListener('resize', () => { drawBits(); drawMeter(modem?.status?.signal || {}); });

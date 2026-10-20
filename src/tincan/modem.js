@@ -31,6 +31,7 @@ export class Modem extends EventTarget {
    * @param {'node'|'listener'} [opts.mode]
    * @param {number} [opts.amplitude]
    * @param {string} [opts.name]
+   * @param {string} [opts.deviceId] microphone to capture from; the default if omitted
    */
   constructor(opts = {}) {
     super();
@@ -45,6 +46,9 @@ export class Modem extends EventTarget {
     this.muted = this.opts.mode === 'listener';
     this.status = null;
     this.warnings = [];
+    this.lastStatusAt = 0;
+    this.stalled = false;
+    this.watchdog = null;
   }
 
   get band() { return BANDS[this.opts.band]; }
@@ -65,11 +69,24 @@ export class Modem extends EventTarget {
   async start() {
     if (this.ready) return this;
 
-    this.stream = await navigator.mediaDevices.getUserMedia({ audio: CAPTURE_CONSTRAINTS });
+    const audio = this.opts.deviceId
+      ? { ...CAPTURE_CONSTRAINTS, deviceId: { exact: this.opts.deviceId } }
+      : CAPTURE_CONSTRAINTS;
+    this.stream = await navigator.mediaDevices.getUserMedia({ audio });
     this._checkCaptureSettings();
 
     this.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
     if (this.ctx.state === 'suspended') await this.ctx.resume();
+    this.ctx.onstatechange = () => {
+      this.dispatchEvent(new CustomEvent('audio-state', { detail: { state: this.ctx && this.ctx.state } }));
+    };
+    if (this.ctx.state !== 'running') {
+      // A suspended context runs no worklet: the node would look joined and
+      // do nothing at all. Browsers do this when they judge the page has no
+      // user activation left, which awaiting the permission prompt can cost.
+      this._warn(`The audio context is ${this.ctx.state}, not running, so this node can neither `
+        + 'hear nor transmit. Click anywhere on the page; if that does not start it, leave and join again.');
+    }
 
     await this.ctx.audioWorklet.addModule(WORKLET_URL);
 
@@ -96,8 +113,49 @@ export class Modem extends EventTarget {
     this.node.connect(this.ctx.destination);
 
     this.ready = true;
+    this.lastStatusAt = Date.now();
+    this.watchdog = setInterval(() => this._watch(), 1000);
+    this.watchdog.unref?.();
     this.dispatchEvent(new CustomEvent('start', { detail: { sampleRate: this.ctx.sampleRate } }));
     return this;
+  }
+
+  /**
+   * The worklet reports ten times a second. If that stops, the audio thread
+   * is not running, and nothing else on the page will say so.
+   */
+  _watch(now = Date.now()) {
+    const quiet = now - this.lastStatusAt > 2000;
+    if (quiet && !this.stalled) {
+      this.stalled = true;
+      this.dispatchEvent(new CustomEvent('stalled', { detail: { state: this.ctx && this.ctx.state } }));
+    } else if (!quiet && this.stalled) {
+      this.stalled = false;
+      this.dispatchEvent(new CustomEvent('resumed', {}));
+    }
+  }
+
+  _warn(text) {
+    this.warnings.push(text);
+    this.dispatchEvent(new CustomEvent('warning', { detail: { warnings: [text] } }));
+  }
+
+  /** What the browser gave this node, for a diagnostics panel or report. */
+  diagnostics() {
+    const track = this.stream && this.stream.getAudioTracks()[0];
+    return {
+      band: this.opts.band,
+      profile: this.opts.profile,
+      audioState: this.ctx ? this.ctx.state : 'none',
+      sampleRate: this.ctx ? this.ctx.sampleRate : null,
+      baseLatency: this.ctx ? this.ctx.baseLatency ?? null : null,
+      outputLatency: this.ctx ? this.ctx.outputLatency ?? null : null,
+      measuredSlopMs: this.measuredSlopMs ?? null,
+      maxRange: this.ctx ? this.maxRange : null,
+      input: track ? { label: track.label || '', settings: track.getSettings ? track.getSettings() : {} } : null,
+      stalled: this.stalled,
+      warnings: [...this.warnings],
+    };
   }
 
   /**
@@ -122,6 +180,7 @@ export class Modem extends EventTarget {
   }
 
   async stop() {
+    if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; }
     if (this.node) { this.node.port.postMessage({ type: 'stop' }); this.node.disconnect(); }
     if (this.source) this.source.disconnect();
     if (this.stream) for (const t of this.stream.getTracks()) t.stop();
@@ -169,6 +228,7 @@ export class Modem extends EventTarget {
         break;
       case 'status':
         this.status = m;
+        this.lastStatusAt = Date.now();
         this.dispatchEvent(new CustomEvent('status', { detail: m }));
         break;
       case 'event': {
@@ -199,4 +259,17 @@ export function checkSupport() {
     problems.push('this page is not a secure context, so the microphone cannot be used — serve over https:// or localhost');
   }
   return { ok: problems.length === 0, problems };
+}
+
+/**
+ * The microphones this browser offers. Labels are empty until the page has
+ * been granted microphone access once, so call it again after starting.
+ * @returns {Promise<{deviceId: string, label: string}[]>}
+ */
+export async function listMicrophones() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) return [];
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  return devices
+    .filter((d) => d.kind === 'audioinput')
+    .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `microphone ${i + 1}` }));
 }
