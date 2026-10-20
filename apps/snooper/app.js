@@ -6,7 +6,7 @@
  */
 
 import { Modem, checkSupport } from '../../src/tincan/modem.js';
-import { BANDS, PROFILES, timing, maxRange } from '../../src/tincan/params.js';
+import { BANDS, PROFILES, timing, maxRange, longestRangeProfile } from '../../src/tincan/params.js';
 import { describeId, describePci, TOPIC, parseBaseId } from '../../src/tincan/transport.js';
 import {
   $, el, hex, hexBytes, asciiBytes, LogView, topbar, escapeHtml, download, db, reportHeader, reportName,
@@ -31,7 +31,7 @@ for (const [key, p] of Object.entries(PROFILES)) {
   profSel.append(el('option', { value: key },
     `${key} — ${Math.round(t.bitRate)} bit/s, ~${maxRange(key).toFixed(1)} m`));
 }
-profSel.value = 'T25';
+profSel.value = longestRangeProfile();       // the Console's default
 
 function describePhy() {
   const t = timing(profSel.value);

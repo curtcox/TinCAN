@@ -4,7 +4,7 @@
 
 import { Modem, checkSupport } from '../../src/tincan/modem.js';
 import {
-  BANDS, PROFILES, DETECTOR_DEFAULTS, timing, maxRange, fastestProfileFor,
+  BANDS, PROFILES, DETECTOR_DEFAULTS, timing, maxRange, fastestProfileFor, longestRangeProfile,
 } from '../../src/tincan/params.js';
 import { buildTransmission, formatFrame } from '../../src/tincan/frame.js';
 import {
@@ -32,7 +32,9 @@ for (const [key, p] of Object.entries(PROFILES)) {
   profSel.append(el('option', { value: key },
     `${key} — ${Math.round(timing(p).bitRate)} bit/s, ~${maxRange(key).toFixed(1)} m`));
 }
-profSel.value = 'T25';
+// Slow, but it works between the most devices at the greatest distance; the
+// note below says when this device could use a faster one.
+profSel.value = longestRangeProfile();
 
 $('#callsign').value = ['ada', 'bob', 'cyd', 'dee', 'eli', 'fay'][Math.floor(Math.random() * 6)];
 $('#address').value = String(1 + Math.floor(Math.random() * 30));
@@ -56,8 +58,12 @@ function describePhy() {
     range = `Arbitration good to about ${maxRange(profSel.value).toFixed(1)} m, if this device's own audio path is `
       + 'fast; <a href="../selftest/">measure it</a> in the Self-test to know.';
   } else if (maxRange(profSel.value, m.slopMs) > 0) {
+    const best = fastestProfileFor(m.slopMs);
+    const faster = timing(best).bitRate / t.bitRate;
     range = `Through ${escapeHtml(name)} this device hears itself ${m.ms.toFixed(1)} ms late (measured `
-      + `${m.at.slice(0, 10)}), so arbitration is good to about ${maxRange(profSel.value, m.slopMs).toFixed(1)} m.`;
+      + `${m.at.slice(0, 10)}), so arbitration is good to about ${maxRange(profSel.value, m.slopMs).toFixed(1)} m.`
+      + (faster > 1 ? ` ${best} would be ${faster.toFixed(faster < 2 ? 2 : 0)}× faster, good to `
+        + `${maxRange(best, m.slopMs).toFixed(1)} m, if every node on the bus can use it too.` : '');
   } else {
     const best = fastestProfileFor(m.slopMs);
     range = `<b>Through ${escapeHtml(name)} this device hears itself ${m.ms.toFixed(1)} ms late (measured `

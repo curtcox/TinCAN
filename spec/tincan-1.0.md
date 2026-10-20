@@ -443,6 +443,8 @@ configured out of band.
 | `0x12` | `T25` — room *(default)* | 2 ms | 40 ms | 25 bit/s | 1 | 10 | 6 | 3 | 2 | 85 % | ~2.4 m |
 | `0x13` | `T10` — hall | 5 ms | 100 ms | 10 bit/s | 1 | 10 | 6 | 3 | 2 | 85 % | ~6.9 m |
 | `0x14` | `T5` — slow | 10 ms | 200 ms | 5 bit/s | 1 | 14 | 3 | 2 | 2 | 90 % | ~3.4 m |
+| `0x15` | `T4` — far | 10 ms | 250 ms | 4 bit/s | 1 | 19 | 3 | 2 | 2 | 92 % | ~12 m |
+| `0x16` | `T2` — farther | 20 ms | 500 ms | 2 bit/s | 1 | 19 | 3 | 2 | 2 | 92 % | ~45 m |
 | `0x1F` | custom | | | | | | | | | | |
 
 Max range is computed in §5.6, and every profile's depends on the audio
@@ -460,6 +462,16 @@ of its 200 ms bit to `PROP_SEG`, leaving a 30 ms detection window, as `T10` has.
 Implementations SHOULD measure the real loopback latency, as the reference
 self-test does, and choose the fastest profile whose `PROP_SEG` covers it with
 room for the distance between nodes (§5.6).
+
+`T4` and `T2` stretch `T5` for distance, with the same slow audio path in mind:
+`PROP_SEG` grows to 190 ms and 380 ms, while the detection window stays 30 ms
+and 60 ms. Their range figures are for arbitration timing alone. Two
+contending nodes must also hear each other within the near-far margin of §4.6,
+which distance does not help: in the reference simulation, two nodes 5 m apart
+collide unnoticed at every profile, each hearing itself 14 dB louder than the
+other. Frames from one sender at a time carry further than the range figure,
+because the receivers' acknowledgement has the second `ACK` bit to arrive in
+(§6.7).
 
 ### 5.3 Hard synchronization
 
@@ -547,14 +559,17 @@ d_max = (PROP_SEG - 2 * t_slop) * c / 2
 
 The `Max range` column of §5.2 assumes `t_slop` of 3 ms for `T50`/`T25`, 1 ms for
 `T100` (bench/loopback, low-latency audio path), 5 ms for `T10`, and 60 ms for
-`T5`, whose reason to exist is a slow audio path.
+`T5`, `T4` and `T2`, whose reason to exist is a slow audio path.
 
 Earlier drafts of this section counted `t_slop` once. The reference
 simulation, with each node's audio latency applied to every path it sends or
 hears on, bears out counting it twice: at 1 m, `T10` delivers between two nodes
 of 20 ms latency and fails between two of 30 ms, and `T25` delivers at 5 ms and
-fails at 10 ms. The transmitter fails first, reading the acknowledgement's
-late tail in the ACK delimiter as a form error.
+fails at 10 ms, when a third node close to the transmitter acknowledges too.
+The transmitter fails first, reading that acknowledgement's late tail in the
+`ACK` delimiter as a form error. An acknowledgement from further away is
+drowned there by the transmitter's own recessive tone, which is why frames from
+one sender at a time carry further than `d_max`; arbitration does not.
 
 Implementations SHOULD measure their own loopback latency and reduce the
 advertised range accordingly. The latency an `AudioContext` reports is not
@@ -1060,20 +1075,20 @@ bits = 8 (SYNC) + 1 (SOF) + 11 (ID) + 1 (RTR) + 1 (IDE) + 1 (FDF) + 1 (r0)
      = 59 + 8n
 ```
 
-| Payload | Bits | `T100` | `T50` | `T25` | `T10` | `T5` |
-|---|---|---|---|---|---|---|
-| 0 B | 59 | 0.59 s | 1.18 s | 2.36 s | 5.9 s | 11.8 s |
-| 1 B | 67 | 0.67 s | 1.34 s | 2.68 s | 6.7 s | 13.4 s |
-| 4 B | 91 | 0.91 s | 1.82 s | 3.64 s | 9.1 s | 18.2 s |
-| 8 B | 123 | 1.23 s | 2.46 s | 4.92 s | 12.3 s | 24.6 s |
+| Payload | Bits | `T100` | `T50` | `T25` | `T10` | `T5` | `T4` | `T2` |
+|---|---|---|---|---|---|---|---|---|
+| 0 B | 59 | 0.59 s | 1.18 s | 2.36 s | 5.9 s | 11.8 s | 14.8 s | 29.5 s |
+| 1 B | 67 | 0.67 s | 1.34 s | 2.68 s | 6.7 s | 13.4 s | 16.8 s | 33.5 s |
+| 4 B | 91 | 0.91 s | 1.82 s | 3.64 s | 9.1 s | 18.2 s | 22.8 s | 45.5 s |
+| 8 B | 123 | 1.23 s | 2.46 s | 4.92 s | 12.3 s | 24.6 s | 30.8 s | 61.5 s |
 
 **Extended data frame** adds 20 bits: `bits = 79 + 8n`.
 
-| Payload | Bits | `T100` | `T50` | `T25` | `T10` | `T5` |
-|---|---|---|---|---|---|---|
-| 0 B | 79 | 0.79 s | 1.58 s | 3.16 s | 7.9 s | 15.8 s |
-| 8 B | 143 | 1.43 s | 2.86 s | 5.72 s | 14.3 s | 28.6 s |
-| 64 B | 591 | 5.91 s | 11.8 s | 23.6 s | 59.1 s | 118 s |
+| Payload | Bits | `T100` | `T50` | `T25` | `T10` | `T5` | `T4` | `T2` |
+|---|---|---|---|---|---|---|---|---|
+| 0 B | 79 | 0.79 s | 1.58 s | 3.16 s | 7.9 s | 15.8 s | 19.8 s | 39.5 s |
+| 8 B | 143 | 1.43 s | 2.86 s | 5.72 s | 14.3 s | 28.6 s | 35.8 s | 71.5 s |
+| 64 B | 591 | 5.91 s | 11.8 s | 23.6 s | 59.1 s | 118 s | 148 s | 296 s |
 
 Effective payload throughput for 8-octet base frames at `T25` is about
 13 octet/s, or 1.6 octet/s of user data per second of bus time — which is to say,

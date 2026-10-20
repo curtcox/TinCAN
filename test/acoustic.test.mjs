@@ -280,6 +280,8 @@ test('published range and margin figures match the parameters they are derived f
   assert.ok(Math.abs(maxRange('T25') - 2.4) < 0.1, `${maxRange('T25')}`);
   assert.ok(Math.abs(maxRange('T10') - 6.9) < 0.1, `${maxRange('T10')}`);
   assert.ok(Math.abs(maxRange('T5') - 3.4) < 0.1, `${maxRange('T5')}`);
+  assert.ok(Math.abs(maxRange('T4') - 12.0) < 0.1, `${maxRange('T4')}`);
+  assert.ok(Math.abs(maxRange('T2') - 44.6) < 0.1, `${maxRange('T2')}`);
   assert.equal(timing('T5').bitTime, 0.2);
   assert.ok(Math.abs(nearFarMarginDb() + 8.6) < 0.1, `${nearFarMarginDb()}`);
 
@@ -454,24 +456,48 @@ test('T5 carries frames between two laptops whose audio paths take 60 ms', () =>
   assert.equal(t10.got.length, 0, 'and T10 cannot');
 });
 
-test('T5 arbitrates between two laptops whose audio paths take 60 ms', () => {
-  const { ch, nodes: [primer, lo, hi] } = devicePair('T5', 60);
+/** Two slow devices `distance` apart contend after a third's frame frees the bus. */
+function arbitrate(profile, latencyMs, distance = 1) {
+  const { ch, nodes: [primer, lo, hi] } = devicePair(profile, latencyMs, distance);
   const loGot = collect(lo, 'frame');
   const hiGot = collect(hi, 'frame');
+  const bit = timing(profile).bitTime;
   ch.run(0.5);
   primer.send({ id: 0x7ff, data: [0] });
-  assert.ok(ch.runUntil(() => primer.transmitting, 20), 'primer never got the bus');
-  ch.run(20 * timing('T5').bitTime);
+  assert.ok(ch.runUntil(() => primer.transmitting, 100 * bit), `${profile}: primer never got the bus`);
+  ch.run(20 * bit);
   lo.send({ id: 0x201, data: [1] });
   hi.send({ id: 0x205, data: [2] });
-  ch.run(200 * timing('T5').bitTime);
+  ch.run(200 * bit);
 
-  assert.equal(hi.stats.arbitrationsLost, 1, 'the higher identifier withdrew');
-  assert.equal(lo.stats.arbitrationsLost, 0);
-  assert.equal(lo.stats.framesSent, 1);
-  assert.equal(hi.stats.framesSent, 1, 'and sent once the bus was free');
-  assert.deepEqual(hiGot.map((f) => f.frame.id), [0x7ff, 0x201]);
-  assert.deepEqual(loGot.map((f) => f.frame.id), [0x7ff, 0x205]);
+  assert.equal(hi.stats.arbitrationsLost, 1, `${profile}: the higher identifier withdrew`);
+  assert.equal(lo.stats.arbitrationsLost, 0, profile);
+  assert.equal(lo.stats.framesSent, 1, profile);
+  assert.equal(hi.stats.framesSent, 1, `${profile}: and sent once the bus was free`);
+  assert.deepEqual(hiGot.map((f) => f.frame.id), [0x7ff, 0x201], profile);
+  assert.deepEqual(loGot.map((f) => f.frame.id), [0x7ff, 0x205], profile);
+}
+
+test('T5 arbitrates between two laptops whose audio paths take 60 ms', () => {
+  arbitrate('T5', 60);
+});
+
+test('T4 and T2 arbitrate between two such laptops, and carry frames tens of metres', () => {
+  for (const profile of ['T4', 'T2']) arbitrate(profile, 60, 2);
+
+  // One sender at a time, no third node to acknowledge for the far one.
+  for (const [profile, distance] of [['T4', 12], ['T2', 40]]) {
+    const ch = channel({
+      profile, deviceLatencyMs: 60, selfDelayMs: 0.5,
+      nodes: [{ name: 'a', x: 0, y: 0 }, { name: 'b', x: distance, y: 0 }],
+    });
+    const [a, b] = ch.protocols;
+    const got = collect(b, 'frame');
+    a.send({ id: 0x123, data: [1, 2, 3, 4] });
+    ch.run(130 * timing(profile).bitTime);
+    assert.equal(got.length, 1, `${profile} at ${distance} m: delivered`);
+    assert.equal(a.stats.framesSent, 1, `${profile} at ${distance} m: acknowledged from that far`);
+  }
 });
 
 test('frames cross a lightly reverberant room, critical distance about 3 m', () => {
@@ -564,6 +590,8 @@ test('a slow audio path is steered to the fastest profile whose PROP_SEG covers 
   // A MacBook Pro's built-in speaker and microphone, measured in Chrome.
   assert.equal(fastestProfileFor(58.6 + 2.5), 'T5');
   assert.ok(maxRange('T5', 61.1) > 3);
-  // An iPhone used as the microphone, through Continuity.
-  assert.equal(fastestProfileFor(168.7), null);
+  // An iPhone used as the microphone, through Continuity: only T2.
+  assert.equal(fastestProfileFor(168.7), 'T2');
+  // A Bluetooth headset's 250 ms: nothing.
+  assert.equal(fastestProfileFor(250), null);
 });

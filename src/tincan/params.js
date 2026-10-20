@@ -33,6 +33,10 @@ export const PROFILES = {
   // built-in speaker and microphone measured 58–63 ms in Chrome. PROP_SEG must
   // cover both ends' latency (spec §5.6), so 140 ms of a 200 ms bit.
   T5:   { id: 0x14, name: 'T5 — slow',    tqMs: 10, sync: 1, prop: 14, ps1: 3, ps2: 2, sjw: 2, slopMs: 60 },
+  // The same split stretched for distance with the same slow audio path:
+  // PROP_SEG grows, the 30–60 ms detection window stays.
+  T4:   { id: 0x15, name: 'T4 — far',     tqMs: 10, sync: 1, prop: 19, ps1: 3, ps2: 2, sjw: 2, slopMs: 60 },
+  T2:   { id: 0x16, name: 'T2 — farther', tqMs: 20, sync: 1, prop: 19, ps1: 3, ps2: 2, sjw: 2, slopMs: 60 },
 };
 
 export const DEFAULT_BAND = 'A';
@@ -98,6 +102,14 @@ export function maxRange(profile, slopMs) {
   const slop = slopMs === undefined ? p.slopMs : slopMs;
   const propMs = p.prop * p.tqMs;
   return Math.max(0, ((propMs - 2 * slop) / 1000) * SPEED_OF_SOUND / 2);
+}
+
+/**
+ * The profile with the longest arbitration range at its assumed t_slop: the
+ * apps' default, since it works between the most devices, however slow.
+ */
+export function longestRangeProfile() {
+  return Object.keys(PROFILES).reduce((best, key) => (maxRange(key) > maxRange(best) ? key : best));
 }
 
 /**

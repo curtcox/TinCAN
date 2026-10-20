@@ -152,18 +152,28 @@ test('two devices close together in a dead room pass every check', () => {
   for (const c of a.profiles.find((p) => p.profile === 'T25').checks) assert.equal(c.ok, true, `T25 ${c.name}: ${c.detail}`);
 });
 
-test('a delay no profile can absorb is called out, with the usual cause', () => {
+test('a wireless microphone is called out even when its delay fits the slowest profile', () => {
   // The figures from a real report: a Mac recording through an iPhone 16 over
-  // Continuity heard itself 169 ms late.
+  // Continuity heard itself 169 ms late. Only T2 can absorb that.
   const self = analyseSelf(record({ latencyMs: 168.7, gain: 0.01 }), FS);
   assert.ok(Math.abs(self.latency * 1000 - 168.7) < 0.5, `latency ${self.latency * 1000} ms`);
 
   const a = assess(self, null, { microphone: '2024 iPhone 16 Microphone' });
-  assert.equal(general(a, 'latency').ok, false);
-  assert.match(general(a, 'latency').detail, /longer than any profile allows \(T5.*72 ms\)/);
-  assert.match(general(a, 'latency').detail, /built-in microphone/);
+  assert.match(general(a, 'latency').detail, /T2 is the fastest profile that allows it/);
   assert.equal(general(a, 'microphone').ok, false);
   assert.match(general(a, 'microphone').detail, /iPhone 16/);
+  for (const p of a.profiles) {
+    assert.equal(p.checks.find((c) => c.name === 'latency').ok, p.profile === 'T2', p.profile);
+  }
+});
+
+test('a delay no profile can absorb is called out, with the usual cause', () => {
+  // A Bluetooth headset's microphone: a quarter of a second.
+  const self = analyseSelf(record({ latencyMs: 250, gain: 0.01 }), FS);
+  const a = assess(self, null, { microphone: 'AirPods Pro' });
+  assert.equal(general(a, 'latency').ok, false);
+  assert.match(general(a, 'latency').detail, /longer than any profile allows \(T2.*197 ms\)/);
+  assert.match(general(a, 'latency').detail, /built-in microphone/);
   for (const p of a.profiles) assert.equal(p.checks.find((c) => c.name === 'latency').ok, false, p.profile);
 });
 
@@ -227,7 +237,7 @@ test('a heard recording reports its level over time and the strength of its matc
 });
 
 test('the advice names the built-in microphone, or a wired one when there is none', () => {
-  const self = analyseSelf(record({ latencyMs: 168.7, gain: 0.01 }), FS);
+  const self = analyseSelf(record({ latencyMs: 250, gain: 0.01 }), FS);
   const mic = '2024 iPhone 16 Microphone';
   const named = assess(self, null, { microphone: mic, builtIn: 'MacBook Pro Microphone' });
   assert.match(general(named, 'microphone').detail, /Use "MacBook Pro Microphone" and measure again/);

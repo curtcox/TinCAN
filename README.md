@@ -78,11 +78,17 @@ the transmitter's.
 | `T25` *(default)* | 25 bit/s | 4.9 s | ~2.4 m | a room |
 | `T10` | 10 bit/s | 12.3 s | ~6.9 m | a hall, or a reverberant one |
 | `T5` | 5 bit/s | 24.6 s | ~3.4 m | devices with a slow audio path, such as laptops' built-in speakers and microphones |
+| `T4` | 4 bit/s | 30.8 s | ~12 m | the same, further apart |
+| `T2` | 2 bit/s | 61.5 s | ~45 m | the same, across a hall |
 
-The ranges assume each device's own audio path, speaker to microphone, takes
-no more than 1 ms (`T100`), 3 ms (`T50`, `T25`), 5 ms (`T10`) or 60 ms (`T5`);
-the [Self-test](https://curtcox.github.io/TinCAN/apps/selftest/) measures it,
-and the Console uses the figure.
+The ranges are for arbitration, and assume each device's own audio path,
+speaker to microphone, takes no more than 1 ms (`T100`), 3 ms (`T50`, `T25`),
+5 ms (`T10`) or 60 ms (`T5`, `T4`, `T2`). The
+[Self-test](https://curtcox.github.io/TinCAN/apps/selftest/) measures that
+path, and the Console uses the figure. Two nodes must also hear each other
+within 8.6 dB of how loudly each hears itself to arbitrate at all (Part 1
+§4.6), which distance does not help; frames from one sender at a time carry
+further than the figures above.
 
 If you want to move bytes over sound, use a packet modem —
 [Wavest](https://github.com/curtcox/Wavest) and the ggwave codec underneath it

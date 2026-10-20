@@ -77,6 +77,12 @@ const REVERB_TAPS = 128;
  * @property {number} [y]
  * @property {number} [gain] transmit gain multiplier (1 = nominal)
  * @property {'node'|'listener'} [mode]
+ * @property {string} [band] this node's band, if not the channel's
+ * @property {string} [profile] this node's bit timing, if not the channel's
+ * @property {string} [device] nodes with the same device share one speaker and
+ *   microphone: a second band on the same computer, as a side link (Part 2 §8)
+ *   runs. Between them the path is the self path.
+ * @property {number} [latencyMs] this node's audio path, overriding deviceLatencyMs
  */
 
 export class AcousticChannel {
@@ -118,8 +124,8 @@ export class AcousticChannel {
       const phy = new Phy({
         sampleRate: this.sampleRate,
         protocol,
-        band: this.band,
-        profile: this.profile,
+        band: spec.band || this.band,
+        profile: spec.profile || this.profile,
         amplitude: (spec.gain ?? 1) * 0.3,
         onBit: spec.onBit,
       });
@@ -137,7 +143,9 @@ export class AcousticChannel {
       this.gain[i] = [];
       for (let j = 0; j < N; j++) {
         const device = Math.round((latency(i) + latency(j)) / 2);
-        if (i === j) {
+        const sameDevice = i === j || (this.nodes[i].spec.device !== undefined
+          && this.nodes[i].spec.device === this.nodes[j].spec.device);
+        if (sameDevice) {
           this.delay[i][j] = device + Math.max(1, Math.round((selfDelayMs / 1000) * this.sampleRate));
           this.gain[i][j] = selfGain;
         } else {
