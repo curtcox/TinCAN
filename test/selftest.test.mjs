@@ -85,6 +85,12 @@ test('the self check measures a room\'s decay and flags an echo that can fake an
     'half a second of reverberation is still well above the noise 114 ms after a bit');
 });
 
+test('a perfectly silent input does not make a vanished echo look like a live one', () => {
+  const a = assess(analyseSelf(record({ latencyMs: 5, gain: 0.5, noise: 0 }), FS));
+  assert.equal(verdict(a, 'T25', 'own echo in the ACK slot').ok, true);
+  assert.match(general(a, 'hears itself').detail, /99 dB above the noise/);
+});
+
 test('a device that never hears its own signal is told so', () => {
   const self = analyseSelf(record({ gain: 0 }), FS);
   assert.equal(self.heard, false);

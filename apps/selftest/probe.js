@@ -334,7 +334,7 @@ export function assess(self, peer = null) {
     ok: !!self.heard,
     detail: self.heard
       ? `own tone at ${db(self.profiles.T25.steady).toFixed(0)} dBFS, `
-        + `${db(self.profiles.T25.steady / self.profiles.T25.noise).toFixed(0)} dB above the noise`
+        + `${Math.min(99, db(self.profiles.T25.steady / self.profiles.T25.noise)).toFixed(0)} dB above the noise`
       : 'the test signal never reached the microphone: speaker muted or too quiet, or echo cancellation removed it. A node that cannot hear itself cannot arbitrate or monitor its own bits.',
   });
 
@@ -380,7 +380,9 @@ export function assess(self, peer = null) {
           + (f < DETECTOR_DEFAULTS.thetaD ? '' : ', so it would see a bit error in its own frame'),
       });
 
-      const ackRatio = s.tailAck / s.noise;
+      // A floor 80 dB under its own tone: a silent input has no noise to
+      // compare with, and an echo that far down is gone anyway.
+      const ackRatio = s.tailAck / Math.max(s.noise, s.steady * 1e-4);
       const safe = ackRatio * ackRatio < DETECTOR_DEFAULTS.kappa;
       checks.push({
         name: 'own echo in the ACK slot',
