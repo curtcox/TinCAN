@@ -62,6 +62,9 @@ export class IdealBus {
   }
 }
 
+/** Echoes in each source's reverberant tail. */
+const REVERB_TAPS = 128;
+
 /* ------------------------------------------------------------------ */
 /* sample-level                                                        */
 /* ------------------------------------------------------------------ */
@@ -85,7 +88,8 @@ export class AcousticChannel {
    * @param {string} [opts.profile]
    * @param {number} [opts.noise] additive white noise amplitude
    * @param {number} [opts.rt60] reverberation time, seconds; 0 disables
-   * @param {number} [opts.reverbLevel] reverberant level relative to direct
+   * @param {number} [opts.reverbLevel] reverberant energy relative to the direct sound at 1 m
+   * @param {number} [opts.reverbSeed] seed for the reverberant tail's echo pattern
    * @param {number} [opts.selfDelayMs] speaker-to-own-microphone latency
    * @param {number} [opts.selfGain] how loudly a node hears itself
    * @param {() => number} [opts.random] uniform [0,1) source, for repeatability
@@ -138,15 +142,36 @@ export class AcousticChannel {
       }
     }
 
-    // Reverberation: one exponentially decaying tap per path, delayed by an
-    // extra 20 ms. Crude, but it reproduces the failure mode that matters —
-    // a dominant tone smearing into the recessive bit after it (spec §4.7).
-    this.reverbDelay = Math.round(0.02 * this.sampleRate);
-    this.reverbDecay = this.rt60 > 0 ? Math.exp(-6.9078 / (this.rt60 * this.sampleRate)) : 0;
+    // Reverberation: a diffuse tail, one per source, heard equally by every
+    // node (including the source itself). It is a sparse impulse response of
+    // randomly placed, random-sign echoes whose amplitude decays by 60 dB over
+    // RT60, scaled so its total energy is `reverbLevel` times the direct sound
+    // at 1 m — i.e. the critical distance is 1/sqrt(reverbLevel) metres. That
+    // reproduces the failure mode that matters: a dominant tone smearing into
+    // the recessive bit after it (spec §4.7).
+    //
+    // An earlier model low-pass filtered the waveform instead, which left a
+    // 3–4 kHz tone about 60 dB down: reverberation in name only.
+    this.reverbTaps = [];
+    if (this.rt60 > 0 && this.reverbLevel > 0) {
+      const rnd = mulberry32(opts.reverbSeed ?? 0x5eed);
+      const first = Math.round(0.005 * this.sampleRate);
+      const span = Math.max(1, Math.round(this.rt60 * this.sampleRate) - first);
+      let energy = 0;
+      for (let k = 0; k < REVERB_TAPS; k++) {
+        const d = first + Math.floor(rnd() * span);
+        const a = (rnd() < 0.5 ? -1 : 1) * Math.pow(10, -3 * (d / this.sampleRate) / this.rt60);
+        this.reverbTaps.push([d, a]);
+        energy += a * a;
+      }
+      const scale = Math.sqrt(this.reverbLevel / energy);
+      for (const tap of this.reverbTaps) tap[1] *= scale;
+    }
+    const maxTap = this.reverbTaps.reduce((m, [d]) => Math.max(m, d), 0);
     this.reverbState = new Float64Array(N);
 
     this.histLen = 1;
-    while (this.histLen < maxDelay + this.reverbDelay + 2) this.histLen <<= 1;
+    while (this.histLen < Math.max(maxDelay, maxTap) + 2) this.histLen <<= 1;
     this.histMask = this.histLen - 1;
     for (const n of this.nodes) n.history = new Float32Array(this.histLen);
 
@@ -161,25 +186,26 @@ export class AcousticChannel {
   stepSample() {
     const N = this.nodes.length;
     const t = this.n;
+    let diffuse = 0;
+    if (this.reverbTaps.length) {
+      for (let j = 0; j < N; j++) {
+        const h = this.nodes[j].history;
+        let s = 0;
+        for (const [d, a] of this.reverbTaps) s += a * h[(t - d) & this.histMask];
+        this.reverbState[j] = s;
+        diffuse += s;
+      }
+    }
     for (let i = 0; i < N; i++) {
       // Assemble node i's input from every node's already-emitted history.
-      let x = 0;
+      let x = diffuse;
       for (let j = 0; j < N; j++) {
         const h = this.nodes[j].history;
         x += this.gain[i][j] * h[(t - this.delay[i][j]) & this.histMask];
-        if (this.reverbDecay > 0 && i !== j) {
-          x += this.gain[i][j] * this.reverbLevel * this.reverbState[j];
-        }
       }
       if (this.noise > 0) x += this.noise * (this.random() * 2 - 1);
       const y = this.nodes[i].phy.processSample(x);
       this.nodes[i].history[t & this.histMask] = y;
-    }
-    if (this.reverbDecay > 0) {
-      for (let j = 0; j < N; j++) {
-        const src = this.nodes[j].history[(t - this.reverbDelay) & this.histMask];
-        this.reverbState[j] = this.reverbState[j] * this.reverbDecay + src * (1 - this.reverbDecay);
-      }
     }
     this.n++;
   }
