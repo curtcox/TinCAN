@@ -192,3 +192,21 @@ test('the Modem says when the audio thread stops reporting, and when it starts a
   assert.equal(modem.diagnostics().stalled, false);
   await modem.stop();
 });
+
+test('the Modem reports audio-context state changes, and only real ones', async () => {
+  fakeBrowser();
+  const modem = new Modem();
+  const states = [];
+  modem.on('audio-state', (e) => states.push(e.detail.state));
+  await modem.start();
+
+  modem.ctx.onstatechange();
+  assert.deepEqual(states, [], 'still running: nothing to report');
+  modem.ctx.state = 'interrupted';
+  modem.ctx.onstatechange();
+  modem.ctx.onstatechange();
+  modem.ctx.state = 'running';
+  modem.ctx.onstatechange();
+  assert.deepEqual(states, ['interrupted', 'running']);
+  await modem.stop();
+});

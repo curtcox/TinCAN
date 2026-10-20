@@ -77,8 +77,13 @@ export class Modem extends EventTarget {
 
     this.ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
     if (this.ctx.state === 'suspended') await this.ctx.resume();
+    // Some browsers fire statechange without the state changing; report changes only.
+    let lastState = this.ctx.state;
     this.ctx.onstatechange = () => {
-      this.dispatchEvent(new CustomEvent('audio-state', { detail: { state: this.ctx && this.ctx.state } }));
+      const state = this.ctx && this.ctx.state;
+      if (state === lastState) return;
+      lastState = state;
+      this.dispatchEvent(new CustomEvent('audio-state', { detail: { state } }));
     };
     if (this.ctx.state !== 'running') {
       // A suspended context runs no worklet: the node would look joined and
