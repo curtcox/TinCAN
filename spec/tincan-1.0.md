@@ -532,11 +532,12 @@ at 150 ms; it survives input arriving 300 ms late, which `PROP_SEG` absorbs.
 Implementations MUST NOT discard input samples to keep their latency down,
 SHOULD prefer audio buffers large enough never to underrun over the last few
 milliseconds of latency, and SHOULD report any loss they can detect. In
-Chrome on a laptop, an idle page's node lost nothing with any buffer size,
-but one in a busy page fell behind and lost microphone input — up to 2 ms a
-second with the smallest buffers, less but not always nothing with the next
-size up, and about 20 ms a second for one of two nodes run in two tabs —
-none of it counted by the capture track's statistics.
+Chrome on a laptop, one of two nodes run in two tabs with the smallest
+buffers its `AudioContext` offered lost about 20 ms of microphone input a
+second, uncounted by the capture track's statistics: the input it captured
+shows the other node's edges arriving early by that much. With the next size
+up, the same two nodes exchanged frames at `T2` with their input on an exact
+grid but for three slips of 5–16 ms.
 
 ### 5.6 Range limit
 

@@ -150,7 +150,8 @@ class TinCanProcessor extends AudioWorkletProcessor {
       this.captureAt++;
     }
     if (x === 0) { this.zeroRun++; return; }
-    if (this.zeroRun >= 64) {
+    // The first two seconds are the capture starting up, not a fault.
+    if (this.zeroRun >= 64 && this.frames > 2 * sampleRate) {
       const ms = (this.zeroRun / sampleRate) * 1000;
       this.gaps.count++;
       this.gaps.ms += ms;

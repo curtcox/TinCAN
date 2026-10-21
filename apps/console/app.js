@@ -383,8 +383,8 @@ function wire(m) {
 
   m.on('input-lost', (e) => {
     diag.lostMs = e.detail.totalMs;
-    log.add(`the audio thread fell ${e.detail.ms.toFixed(0)} ms behind, and the microphone audio in that time `
-      + 'was lost: everything after it arrives that much early, and a frame in flight may fail', 'warnrow');
+    log.add(`the audio thread stalled for ${e.detail.ms.toFixed(0)} ms: if the browser discarded the microphone `
+      + 'audio meanwhile, everything after it arrives that much early, and a frame in flight may fail', 'warnrow');
   });
 
   m.on('input-dropped', (e) => {

@@ -26,13 +26,16 @@ export const CAPTURE_CONSTRAINTS = {
 /**
  * The AudioContext options for a node. 'interactive' rather than the smallest
  * buffers (`latencyHint: 0`), which save about 5 ms of latency but leave the
- * audio thread less slack: on a MacBook Pro in Chrome, in a busy page, a node
- * at `0` fell 60 ms behind real time in 30 s and the browser discarded the
- * microphone input it had no room for; 'interactive' lost less, though not
- * always nothing. Every lost stretch makes all later edges arrive early, and
- * enough of it moves the sample point into the next bit (spec §5.5).
+ * audio thread less slack: on a MacBook Pro in Chrome, one of two nodes in
+ * two tabs at `0` lost about 20 ms of microphone input a second, and misread
+ * a T2 frame; at 'interactive' the same pair exchanged frames cleanly. Every
+ * lost stretch makes all later edges arrive early, and enough of it moves the
+ * sample point into the next bit (spec §5.5).
  */
 export const CONTEXT_OPTIONS = { latencyHint: 'interactive' };
+
+/** A stall of the audio thread this long within one second is reported. */
+const STALL_MS = 25;
 
 /**
  * getUserMedia audio constraints for the microphone `deviceId`, or for the
@@ -194,19 +197,23 @@ export class Modem extends EventTarget {
   }
 
   /**
-   * How far the audio thread has fallen behind real time. Rendering that
-   * falls behind cannot take the microphone audio that arrived meanwhile, and
-   * the browser discards it, uncounted by the track's statistics.
+   * Sudden stalls of the audio thread. A thread that stops for tens of
+   * milliseconds may leave the browser no room for the microphone audio that
+   * arrived meanwhile, and it discards it, uncounted by the track's
+   * statistics. Slow divergence between the audio and system clocks is not
+   * that: two tabs' nodes drifted 1 ms a second apart from real time while
+   * their input stayed on an exact grid. So only a jump of STALL_MS within
+   * one check is reported, as a possible loss.
    */
   _checkBehind(wall = performance.now(), audio = this.ctx?.currentTime) {
     if (!this.clock || audio === undefined || this.ctx?.state !== 'running') return;
     const behind = (wall - this.clock.wall) - (audio - this.clock.audio) * 1000;
-    this.clock.behindMs = Math.max(this.clock.behindMs, behind);
-    // Quantum-sized jitter is not loss; report each further 10 ms.
-    if (this.clock.behindMs - this.clock.reportedMs >= 10) {
-      const ms = this.clock.behindMs - this.clock.reportedMs;
-      this.clock.reportedMs = this.clock.behindMs;
-      this.dispatchEvent(new CustomEvent('input-lost', { detail: { ms, totalMs: this.clock.behindMs } }));
+    const step = behind - (this.clock.last ?? behind);
+    this.clock.last = behind;
+    this.clock.behindMs = behind;
+    if (step >= STALL_MS) {
+      this.clock.reportedMs += step;
+      this.dispatchEvent(new CustomEvent('input-lost', { detail: { ms: step, totalMs: this.clock.reportedMs } }));
     }
   }
 

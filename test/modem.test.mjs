@@ -298,7 +298,7 @@ test('the Modem takes input latency from the track\'s statistics, and reports dr
   await modem.stop();
 });
 
-test('the Modem reports when its audio thread falls behind and microphone audio is lost', async () => {
+test('the Modem reports sudden stalls of its audio thread, not slow clock drift', async () => {
   fakeBrowser();
   const modem = new Modem({ profile: 'T2' });
   await modem.start();
@@ -306,14 +306,15 @@ test('the Modem reports when its audio thread falls behind and microphone audio 
   modem.clock = { wall: 0, audio: 0, behindMs: 0, reportedMs: 0 };
   const lost = [];
   modem.on('input-lost', (e) => lost.push(e.detail));
-  modem._checkBehind(1000, 0.995);
-  assert.deepEqual(lost, [], 'a few milliseconds is render-quantum jitter');
-  // The figures of a node at latencyHint 0: 60 ms behind in 30 s.
-  modem._checkBehind(30000, 29.94);
+  // Two tabs' nodes: 1 ms a second apart from real time, input intact.
+  for (let s = 1; s <= 30; s++) modem._checkBehind(s * 1000, s * 0.999);
+  assert.deepEqual(lost, [], 'drift is not loss');
+  // A stall: 60 ms of real time with no audio rendered.
+  modem._checkBehind(31060, 30.97);
   assert.equal(lost.length, 1);
-  assert.ok(Math.abs(lost[0].ms - 60) < 1e-6 && Math.abs(lost[0].totalMs - 60) < 1e-6, JSON.stringify(lost));
-  modem._checkBehind(31000, 30.94);
-  assert.equal(lost.length, 1, 'no further loss, no further report');
-  assert.ok(Math.abs(modem.diagnostics().input.lostMs - 60) < 1e-6);
+  assert.ok(Math.abs(lost[0].ms - 60) < 1.5, JSON.stringify(lost));
+  modem._checkBehind(32060, 31.97);
+  assert.equal(lost.length, 1, 'no further stall, no further report');
+  assert.ok(Math.abs(modem.diagnostics().input.lostMs - lost[0].ms) < 1e-9);
   await modem.stop();
 });
