@@ -408,8 +408,12 @@ export function validate(desc) {
 /* span and expansion                                                  */
 /* ------------------------------------------------------------------ */
 
-/** Each play/record/measure/node action with its absolute start, repeats unrolled. */
-function eachAction(desc, fn) {
+/**
+ * Each leaf action with its absolute start in seconds, repeats unrolled:
+ * `fn(action, tStart, index)`, `index` its position in its own array — the
+ * number `expand` tags measure replacements with.
+ */
+export function eachAction(desc, fn) {
   const walk = (actions, base) => {
     actions.forEach((a, i) => {
       const t = base + (a.t ?? 0);
