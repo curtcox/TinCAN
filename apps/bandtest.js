@@ -98,12 +98,13 @@ export class BandTestPanel {
     t.on('request', ({ test }) => {
       this.current = test;
       if (!test.mine) {
-        const joining = test.joins.has(session.address);
+        const joining = !!test.joined;
         this.log(`${this.name(test.requester)} requests a band test of ${test.bands.join('')}: `
           + (joining ? 'joining' : 'listening only'));
       }
       this.show();
     });
+    t.on('state', ({ test }) => { if (test === this.current) this.show(); });
     t.on('join', ({ test, address }) => { if (test === this.current) this.show(); this.log(`${this.name(address)} joins the band test`); });
     t.on('start', ({ test }) => {
       this.current = test;

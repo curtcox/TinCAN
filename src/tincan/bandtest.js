@@ -184,7 +184,7 @@ export function joinWindow(profile) {
  *   play(signal, at)           play signal, sample 0 at `at`; parts already past are skipped
  *   record(at, samples, done)  record from `at`; parts already past are zeros
  *
- * Events: 'request' {test}, 'join' {test, address}, 'start' {test},
+ * Events: 'request' {test}, 'state' {test}, 'join' {test, address}, 'start' {test},
  * 'measured' {test}, 'report' {test, from}, 'done' {test}, 'log' {text, kind}.
  */
 export class BandTests {
@@ -261,6 +261,7 @@ export class BandTests {
     if (!t) return;
     if (op === CONTROL.TEST_REQUEST && t.state === 'requested') {
       t.state = 'joining';
+      this._emit('state', { test: t });
       this._log(`band test #${test}: waiting ${t.window} s for nodes to join`);
       this.audio.after(t.window, () => this._start(t));
     } else if (op === CONTROL.TEST_START && t.state === 'starting') {
@@ -272,6 +273,7 @@ export class BandTests {
     if (t.state !== 'joining') return;
     t.players = [...t.joins.keys()].slice(0, MAX_PLAYERS);
     t.state = 'starting';
+    this._emit('state', { test: t });
     this.session.sendTestMessage({ op: CONTROL.TEST_START, test: t.test, bands: t.bands, players: t.players });
   }
 
@@ -282,13 +284,13 @@ export class BandTests {
         const t = this._test(source, c.test);
         Object.assign(t, { bands: c.bands, window: c.window });
         t.joins.set(source, c.bands);
-        this._emit('request', { test: t });
         const mine = c.bands.filter((b) => this.opts.canRun(b));
         if (!this.opts.listenOnly && mine.length && this.opts.join(t)) {
           this.session.sendTestMessage({ op: CONTROL.TEST_JOIN, requester: source, test: c.test, bands: mine });
           t.joins.set(this.me, mine);
           t.joined = true;
         }
+        this._emit('request', { test: t });
         return;
       }
       case CONTROL.TEST_JOIN: {

@@ -535,7 +535,7 @@ function renderPeers() {
       el('span', { class: 'body' },
         p.callsign || '(no callsign)',
         el('span', { class: 'muted' }, ` v${p.version.toString(16)}`
-          + (p.segmented ? ' seg' : '') + (p.text ? ' text' : '') + (p.sideLinks ? ' links' : '')))));
+          + (p.segmented ? ' seg' : '') + (p.text ? ' text' : '') + (p.sideLinks ? ' links' : '') + (p.bandTests ? ' tests' : '')))));
   }
 }
 renderPeers();
