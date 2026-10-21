@@ -16,6 +16,9 @@ import { LinkEnd } from '../sidelink.js';
 
 $('#chrome').replaceWith(topbar('Pair test'));
 
+/** The run in progress or last finished: its checks, timeline and nodes. */
+let run = null;
+
 /* ---------------------------------------------------------------- */
 /* settings                                                          */
 /* ---------------------------------------------------------------- */
@@ -75,7 +78,6 @@ const CHECKS = [
   ['clean', 'no errors on any of the four nodes'],
 ];
 
-let run = null;
 const checkView = $('#checks');
 const timeline = new LogView($('#timeline'), { limit: 2000 });
 
