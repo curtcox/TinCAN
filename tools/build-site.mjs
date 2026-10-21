@@ -65,6 +65,7 @@ const NAV = [
   ['apps/console/', 'Console'],
   ['apps/simulator/', 'Simulator'],
   ['apps/selftest/', 'Self-test'],
+  ['apps/pair/', 'Pair test'],
   ['apps/bands/', 'Bands'],
 ];
 

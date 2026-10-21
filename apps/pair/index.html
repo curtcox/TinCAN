@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TinCAN Pair Test</title>
+<meta name="description" content="Two TinCAN nodes in one tab: they join a bus, agree a side link, talk over it and close it, with each step checked.">
+<link rel="stylesheet" href="../../style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🥫</text></svg>">
+</head>
+<body>
+<div id="chrome"></div>
+
+<main class="wrap">
+  <h1 style="margin:0 0 .2rem;font-size:1.6rem;letter-spacing:-.02em">Pair test</h1>
+  <p style="margin:0 0 1.5rem;color:var(--dim)">
+    Two <a href="../console/">Console</a> nodes, ada and bob, run in this one tab and share this
+    device's speaker and microphone. They join the main bus, ada proposes a side link and bob judges
+    and accepts it as the Console would, they send a message each way over the link, and ada closes
+    it (<a href="../../spec/transport.html#8-side-links">Part 2 §8</a>). Each step is checked as it
+    happens. Running both nodes in one tab avoids the browser silencing one tab's audio when another
+    starts a stream, which stops two Console tabs testing a link. Each node hears the other exactly as
+    loudly as itself, so this tests the protocol and the browser's audio, not distance.
+  </p>
+
+  <div class="panel">
+    <div class="grid cols-2">
+      <div>
+        <label class="field"><span>Main bus band</span><select id="band"></select></label>
+        <label class="field"><span>Main bus timing</span><select id="profile"></select></label>
+      </div>
+      <div>
+        <label class="field"><span>Side link band</span><select id="linkband"></select></label>
+        <label class="field"><span>Side link timing</span><select id="linkprofile"></select></label>
+      </div>
+    </div>
+    <label class="field"><span>Transmit level <b id="ampval">25%</b></span>
+      <input id="amp" type="range" min="5" max="60" value="25"></label>
+    <p class="note" id="plan"></p>
+    <div class="row">
+      <button id="start" class="primary">Run the pair test</button>
+      <button id="stop" disabled>Stop</button>
+      <span class="spacer"></span>
+      <span id="elapsed" class="pill">not run</span>
+      <span id="verdict" class="pill">—</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Checks</h2>
+    <div id="checks" class="log" style="max-height:none"></div>
+  </div>
+
+  <div class="panel">
+    <h2>Nodes</h2>
+    <div class="table-scroll"><table id="counters"></table></div>
+  </div>
+
+  <div class="panel">
+    <div class="row" style="margin-bottom:.75rem">
+      <h2 style="margin:0">Timeline</h2>
+      <span class="spacer"></span>
+      <button id="report">Download report</button>
+    </div>
+    <div id="timeline" class="log" style="max-height:28rem"></div>
+  </div>
+</main>
+
+<script type="module" src="./app.js"></script>
+</body>
+</html>

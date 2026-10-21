@@ -67,7 +67,7 @@ Object.defineProperty(globalThis, 'navigator', {
 });
 process.on('unhandledRejection', (err) => errors.push(err));
 
-for (const app of ['console', 'snooper', 'simulator', 'selftest', 'bands']) {
+for (const app of ['console', 'snooper', 'simulator', 'selftest', 'bands', 'pair']) {
   test(`the ${app} page's script runs to completion on load`, async () => {
     await import(`../apps/${app}/app.js`);
     await new Promise((r) => setTimeout(r, 20));      // let start-up promises settle

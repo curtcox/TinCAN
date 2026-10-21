@@ -98,6 +98,7 @@ export function topbar(current) {
     ['../console/', 'Console'],
     ['../simulator/', 'Simulator'],
     ['../selftest/', 'Self-test'],
+    ['../pair/', 'Pair test'],
     ['../bands/', 'Bands'],
   ];
   return el('header', { class: 'topbar' },

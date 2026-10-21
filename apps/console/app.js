@@ -9,12 +9,13 @@ import {
 import { buildTransmission, formatFrame } from '../../src/tincan/frame.js';
 import {
   Session, baseId, describeId, describeControl, parseBaseId, PRIO, TOPIC, segment, BROADCAST_BASE,
-  assessProposal, linkTimeout, CONTROL, DECLINE, DECLINE_TEXT, CLOSE, CLOSE_TEXT,
+  assessProposal, DECLINE, DECLINE_TEXT, CLOSE, CLOSE_TEXT,
 } from '../../src/tincan/transport.js';
 import {
   $, el, hex, hexBytes, parseHexBytes, parseId, db, download, reportHeader, reportName,
   LogView, topbar, escapeHtml, drawBits, drawMeter, fillMicrophones, micName, measuredLatency,
 } from '../ui.js';
+import { LinkEnd } from '../sidelink.js';
 
 $('#chrome').replaceWith(topbar('Console'));
 
@@ -749,9 +750,8 @@ $('#linkpropose').addEventListener('click', () => {
 
 $('#linkclose').addEventListener('click', () => {
   if (!link) return;
-  session.closeLink(link.rec, CLOSE.FINISHED);
   linkLog.add(`closed #${link.rec.link}`, 'tx');
-  stopLink();
+  link.close(CLOSE.FINISHED);
 });
 
 function onProposal(rec) {
@@ -782,92 +782,36 @@ function onProposal(rec) {
 /** Part 2 §8.3: start a second node on the link's band, keep the main one. */
 async function openLink(rec) {
   if (link) return;
-  const peer = rec.proposer === session.address ? rec.peer : rec.proposer;
-  link = { rec, peer, up: false, modem: null, session: null, timer: null, sent: 0, recv: 0, errors: 0 };
-  setLinkState('opening…', 'live');
-  setLinkControls();
   for (const row of offers.values()) row.remove();
   offers.clear();
-  linkLog.add(`opening #${rec.link} with node ${peer}: band ${rec.band}, ${rec.profile}`);
-  try {
-    const m = new Modem({
-      band: rec.band, profile: rec.profile, mode: 'node', amplitude: Number($('#amp').value) / 100,
-      name: `${session.callsign || 'node'}-link`, deviceId: $('#mic').value || undefined, ...thresholds(),
-    });
-    link.modem = m;
-    await m.start();
-    if (modem?.measuredLatencyMs != null) m.measuredLatencyMs = modem.measuredLatencyMs;
-    const ls = new Session({ on: (ev, fn) => m.on(ev, (e) => fn(e.detail)), send: (f) => m.send(f) },
-      { address: session.address, callsign: session.callsign });
-    link.session = ls;
-    m.on('tx-complete', () => { link && link.sent++; showLinkCounters(); });
-    m.on('frame', () => { link && link.recv++; showLinkCounters(); });
-    m.on('error-frame', (e) => {
-      if (!link) return;
-      link.errors++;
-      showLinkCounters();
-      linkLog.add(escapeHtml(e.detail.kind === 'ack' ? 'no acknowledgement on the link' : `${e.detail.kind} error`), 'err');
-    });
-    ls.on('presence', ({ address }) => {
-      if (!link || address !== peer || link.up) return;
-      link.up = true;
-      clearTimeout(link.timer);
-      setLinkState(`up: band ${rec.band}, ${rec.profile}`, 'ok');
-      linkLog.add(`#${rec.link} is up: heard node ${peer} on band ${rec.band}`, 'tx');
-      if (rec.proposer !== session.address) ls.announce();     // answer the proposer's
-      setLinkControls();
-    });
-    ls.on('message', ({ text, data }) => {
-      const who = peers.get(peer)?.callsign || `node ${peer}`;
-      chat.add(`<b>${escapeHtml(who)}</b> <span class="muted">(side link)</span> `
-        + (text !== null ? escapeHtml(text) : hexBytes(data)));
-    });
-    if (rec.proposer === session.address) ls.announce();
-    const limit = linkTimeout(rec.profile);
-    const startTimer = () => {
-      link.timer = setTimeout(() => {
-        if (!link || link.up) return;
-        linkLog.add(`nothing heard on #${rec.link} in ${limit.toFixed(0)} s: closing`, 'err');
-        session.closeLink(rec, CLOSE.NO_CONTACT);
-        stopLink();
-      }, limit * 1000);
-    };
-    if (rec.proposer === session.address) {
-      startTimer();                       // it has heard the acceptance, so it was delivered
-    } else {
-      // Part 2 §8.3: T_link runs from the acceptance's delivery, which on a
-      // slow, busy main bus can be minutes after it was queued.
-      const isAccept = (f) => f && !f.extended && parseBaseId(f.id).topic === TOPIC.CONTROL
-        && f.data?.[0] === CONTROL.LINK_ACCEPT && f.data?.[2] === rec.link;
-      const done = () => { offOk(); offFail(); };
-      const offOk = modem.on('tx-complete', (e) => {
-        if (link?.rec !== rec || !isAccept(e.detail.frame)) return;
-        done();
-        linkLog.add(`acceptance of #${rec.link} delivered; waiting for node ${peer} on band ${rec.band}`);
-        startTimer();
-      });
-      const offFail = modem.on('tx-failed', (e) => {
-        if (link?.rec !== rec || !isAccept(e.detail.item?.frame)) return;
-        done();
-        linkLog.add(`could not deliver the acceptance of #${rec.link}: closing`, 'err');
-        stopLink();
-      });
-    }
-  } catch (err) {
-    linkLog.add(`could not start the link: ${escapeHtml(err.message || err)}`, 'err');
-    session.closeLink(rec, CLOSE.ERRORS);
-    await stopLink();
-  }
+  const end = new LinkEnd({
+    rec, session, modem,
+    modemOptions: { amplitude: Number($('#amp').value) / 100, deviceId: $('#mic').value || undefined, ...thresholds() },
+  });
+  link = end;
+  setLinkState('opening…', 'live');
+  setLinkControls();
+  end.on('log', ({ text, kind }) => linkLog.add(escapeHtml(text), kind));
+  end.on('counters', showLinkCounters);
+  end.on('up', () => {
+    setLinkState(`up: band ${rec.band}, ${rec.profile}`, 'ok');
+    setLinkControls();
+  });
+  end.on('message', ({ text, data }) => {
+    const who = peers.get(end.peer)?.callsign || `node ${end.peer}`;
+    chat.add(`<b>${escapeHtml(who)}</b> <span class="muted">(side link)</span> `
+      + (text !== null ? escapeHtml(text) : hexBytes(data)));
+  });
+  end.on('ended', () => {
+    if (link === end) link = null;
+    setLinkState(`closed #${rec.link}`);
+    setLinkControls();
+  });
+  await end.open();
 }
 
 async function stopLink() {
-  if (!link) return;
-  const l = link;
-  link = null;
-  clearTimeout(l.timer);
-  if (l.modem) await l.modem.stop().catch(() => {});
-  setLinkState(`closed #${l.rec.link}`);
-  setLinkControls();
+  if (link) await link.stop();
 }
 
 function showLinkCounters() {
@@ -880,7 +824,7 @@ function showLinkCounters() {
 function sendLinkText() {
   const text = $('#linktext').value;
   if (!link?.up || !text) return;
-  link.session.sendText(text);
+  link.sendText(text);
   chat.add(`<b>${escapeHtml(session.callsign || 'me')}</b> <span class="muted">(side link)</span> ${escapeHtml(text)}`, 'tx');
   $('#linktext').value = '';
 }
