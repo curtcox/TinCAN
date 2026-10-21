@@ -518,6 +518,18 @@ On the first dominant edge observed after an idle bus — the leading edge of
 `SYNC_SEG` of bit 0 contains that edge. No `SJW` limit applies to hard
 synchronization.
 
+The same applies to a receiver that reads `SYNC` bit 0 in `INTERMISSION` or in
+suspend transmission (§6.8). Its bit clock can trail the next transmitter's by
+more than `PHASE_SEG2` — by what resynchronization on the last frame's
+acknowledgement and on noise in the interframe space left — so that frame's
+first edge can arrive before the sample point of its own last `INTERMISSION`
+bit. Resynchronizing on that edge, clamped to `SJW`, would leave its next
+sample points up to half a bit early, straddling `SYNC` bits 0 and 1, which it
+would then read as an overload flag. A receiver MAY restart its clock only once
+the sample point has read the bit as dominant, so that noise in the
+interframe space does not move the clock contenders start on (§7.1); the edge
+may then be one its detector reports just after that sample.
+
 ### 5.4 Transmit hard synchronization
 
 This has no CAN analogue and exists because acoustic propagation delay is four

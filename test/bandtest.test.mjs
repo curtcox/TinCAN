@@ -141,10 +141,8 @@ test('three players and a listener each end with how every player heard every ot
   });
 
   ch.run(1);                                          // let every receiver settle on an idle bus
-  // A fixed test number, so the frames' bits are the same each run. With some
-  // numbers (7, 99) the listener loses sync where all three players start
-  // reports at once, and misses one report: a Part 1 matter, not a band test's.
-  tests.ada.nextTest = 1;
+  // A fixed test number, so the frames' bits are the same each run.
+  tests.ada.nextTest = 99;
   const t = tests.ada.request({ bands: ['G', 'E', 'D', 'A', 'B'], window: joinWindow('T25') });
   assert.deepEqual(t.bands, ['A', 'D', 'E', 'G'], 'only bands the requester can run, lowest ID first');
   const done = () => Object.values(tests).every((bt) => [...bt.tests.values()].some((x) => x.state === 'done'));

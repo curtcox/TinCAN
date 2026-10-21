@@ -10,6 +10,9 @@
 import { BANDS, PROFILES, DETECTOR_DEFAULTS, timing, minTqMs } from './params.js';
 import { DOMINANT, RECESSIVE, STATE } from './protocol.js';
 
+/** Receiver states in which a dominant bit starts a frame (spec §5.3, §6.8). */
+const BETWEEN_FRAMES = new Set([STATE.BUS_IDLE, STATE.INTERMISSION, STATE.SUSPEND]);
+
 const bandName = (b) => Object.keys(BANDS).find((k) => BANDS[k] === b) ?? `${b.fR}/${b.fD} Hz`;
 
 /** Goertzel power of a windowed block, read from a ring buffer. */
@@ -129,6 +132,9 @@ export class Phy {
     this.bitCount = 0;
     this.sampled = false;
     this.txSyncApplied = false;
+    this.hardSyncBit = -1;            // bit whose clock a hard sync last restarted
+    this.rxSyncBit = -1;              // bit whose sample took a receiver into SYNC
+    this.lastOnset = -Infinity;       // sample index of the latest dominant edge
 
     // Edge tracking
     this.lastEdgeLevel = RECESSIVE;
@@ -276,6 +282,7 @@ export class Phy {
     if (this.onEdge) this.onEdge({ onset, bit: this.bitCount });
 
     const proto = this.protocol;
+    this.lastOnset = onset;
 
     // Transmit hard synchronization — spec §5.4.
     if (proto.inTxSyncField && !this.txSyncApplied && proto.syncIndex === 0) {
@@ -297,6 +304,16 @@ export class Phy {
       // bit we were in the middle of no longer applies.
       this.sampled = false;
       this.txSyncApplied = false;
+      this.hardSyncBit = this.bitCount;
+      return;
+    }
+
+    // A receiver whose sample read SYNC bit 0 before the debounced edge
+    // detector reported its edge (see _samplePoint) hard-synchronizes on that
+    // edge now.
+    if (!proto.transmitting && proto.state === STATE.SYNC
+        && this.rxSyncBit === this.bitCount && this.hardSyncBit !== this.bitCount) {
+      this._hardSyncSampled(onset);
       return;
     }
 
@@ -319,7 +336,23 @@ export class Phy {
   _samplePoint() {
     const m = this._measure(this.winSamples, this.winMain, this.noiseEst * this.noiseScale);
     this.last = m;
+    const between = BETWEEN_FRAMES.has(this.protocol.state);
     this.protocol.endBit(m.level, m.carrier);
+    if (between && this.protocol.state === STATE.SYNC && !this.protocol.transmitting
+        && this.hardSyncBit !== this.bitCount) {
+      // This sample read SYNC bit 0 without the bit clock having restarted at
+      // its edge: the edge came while this node was in INTERMISSION or suspend
+      // transmission, where §6.8 takes it as SYNC bit 0 all the same, or it is
+      // still inside the debounce. The node trails the next transmitter by
+      // that node's latency and the distance between them, so the next frame's
+      // first edge often reaches it during its own last INTERMISSION bit, and
+      // the SJW-limited resync it gets there leaves the following sample points
+      // up to half a bit early. Hard-synchronize on the edge now, keeping this
+      // sample. Waiting for the sample to confirm the edge keeps noise in the
+      // interframe space from moving the clock that contenders start on (§7.1).
+      if (this.lastEdgeLevel === DOMINANT && this.lastOnset > this.n - this.bitSamples) this._hardSyncSampled(this.lastOnset);
+      else this.rxSyncBit = this.bitCount;
+    }
     if (this.onBit) {
       this.onBit({
         index: this.bitCount,
@@ -332,6 +365,14 @@ export class Phy {
         state: this.protocol.state,
       });
     }
+  }
+
+  /** Restart the bit clock at the edge of a SYNC bit 0 already sampled (§5.3). */
+  _hardSyncSampled(onset) {
+    this.hardSyncBit = this.bitCount;
+    this.bitStart = onset;
+    this.samplePointAt = onset + this.syncSamples + this.propSamples + this.ps1Samples;
+    this.bitEndAt = Math.max(this.n + 1, onset + this.bitSamples);
   }
 
   _nextBit() {

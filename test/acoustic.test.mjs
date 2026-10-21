@@ -181,6 +181,39 @@ test('transmit hard synchronization lets nodes two metres apart still arbitrate'
   assert.equal(a.stats.bitErrors + b.stats.bitErrors, 0);
 });
 
+test('a receiver whose clock trails the next frame hard-synchronizes on SYNC that begins in its INTERMISSION', () => {
+  // A receiver's clock can trail the next transmitter's by more than
+  // PHASE_SEG2: noise edges in the silent interframe space each stretched a
+  // listener's bit by SJW in a band test, so the next frame's first edge came
+  // before the sample point of its last INTERMISSION bit. Here its input moves
+  // that much earlier during the interframe space instead. An SJW-limited
+  // resync on that edge left its sample points half a bit early, SYNC bits 0
+  // and 1 read as an overload flag, and the frame was lost. At 7.75 ms the
+  // sample reads SYNC bit 0 before the debounced edge detector reports it.
+  for (const ms of [7, 7.75, 8, 9, 10, 12]) {
+    const ch = channel({
+      shiftHeadroomMs: 20,
+      nodes: [
+        { name: 'a', x: 0, y: 0 },
+        { name: 'b', x: 0, y: 0.5 },                    // acknowledges
+        { name: 'l', x: 0.5, y: 0, mode: 'listener' },
+      ],
+    });
+    const [a, , l] = ch.protocols;
+    const got = collect(l, 'frame');
+    const overloads = collect(l, 'overload');
+    ch.shiftInput('l', 20);                           // room to hear it early later
+    ch.run(0.5);
+    a.send({ id: 0x123, data: [1] });
+    assert.ok(ch.runUntil(() => got.length === 1, 6), `${ms} ms: first frame`);
+    a.send({ id: 0x124, data: [2] });                 // follows after INTERMISSION
+    ch.shiftInput('l', -ms);
+    ch.run(4);
+    assert.deepEqual(got.map((g) => g.frame.id), [0x123, 0x124], `${ms} ms early: both frames`);
+    assert.equal(overloads.length, 0, `${ms} ms early: no overload`);
+  }
+});
+
 test('a lone node transmits, is not acknowledged, and says so', () => {
   const ch = channel({ nodes: [{ name: 'solo', x: 0, y: 0 }] });
   const [solo] = ch.protocols;
