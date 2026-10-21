@@ -383,7 +383,7 @@ address. The first payload octet of a `CONTROL` frame is an opcode:
 | to | 1 | The node invited, or `31` for any node that wants to join |
 | proposer, peer | 1 | The node the message answers or is addressed to |
 | link | 1 | Chosen by the proposer; with the proposer's address it names the link |
-| band | 1 | Part 1 §4.2 band ID, `0x01`–`0x05` |
+| band | 1 | Part 1 §4.2 band ID, `0x01`–`0x07` |
 | profile | 1 | Part 1 §5.2 profile ID, `0x10`–`0x16` |
 | t_slop | 1 | The sender's measured t_slop (Part 1 §5.6) in ms, 0–254; `255` if unknown |
 
@@ -419,8 +419,9 @@ only its own; the invited node, knowing both, MUST decline with reason `2` if
 the profile cannot cover the larger of the two at any distance, and MAY decline
 if it judges the distance between them too great.
 
-Band B needs a sample rate of at least 44.1 kHz and a speaker and microphone
-that work above 17 kHz; a node that cannot run it MUST decline with reason `1`.
+Bands B and F need a sample rate of at least 44.1 and 48 kHz (Part 1 §4.2) and
+a speaker and microphone that work above 17 and 20 kHz; a node that cannot run
+the band MUST decline with reason `1`.
 
 ### 8.3 Opening, checking and closing
 

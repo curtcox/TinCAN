@@ -35,5 +35,14 @@ test('the sweep finds the band a speaker and microphone carry, wherever the soun
   const at1k = r.points.find((p) => p.f === 1000);
   assert.ok(Math.abs(at1k.gainDb - 20 * Math.log10(0.5)) < 0.5, `gain at 1 kHz ${at1k.gainDb}`);
 
+  // A quiet room, or a converter filter that cuts the noise with the tone: the
+  // edges stand far above the noise, but 25 dB below the rest do not carry well.
+  const quiet = new Float32Array(played.length);
+  for (let i = 0; i < quiet.length; i++) quiet[i] = 0.5 * (i >= delay ? played[i - delay] : 0) + 2e-5 * (rnd() - 0.5);
+  const q = analyseSweep(quiet, fs, plan);
+  assert.ok(Math.abs(q.typicalDb - 20 * Math.log10(0.5)) < 0.5, 'typical level');
+  assert.deepEqual(q.carries, { low: first(120), high: last(19000) });
+  assert.deepEqual(q.usable, { low: first(90), high: last(20500) });
+
   assert.throws(() => analyseSweep(new Float32Array(rec.length), fs, plan), /did not hear/);
 });

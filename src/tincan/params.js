@@ -20,8 +20,29 @@ export const BANDS = {
   // A fifth the spacing of the others, so it needs five times the time
   // quantum (minTqMs below): T10 and slower.
   E: { id: 0x05, name: 'E — deep',            fR: 650,   fD: 900,   guardLo: 550,   guardHi: 1000,
-       note: 'Lowest pitch: carries round corners and through doors best. T10 and slower only. Competes with speech.' },
+       note: 'Low pitch: carries round corners and through doors well. T10 and slower only. Competes with speech.' },
+  // The top and bottom of what a MacBook Pro's built-in speaker and microphone
+  // carry evenly: −8 to −12 dB from 19 to 22.75 kHz at 48 kHz, −15 to −17 dB
+  // from 100 to 400 Hz. G is A's layout at a twentieth of the scale, the
+  // lowest that T2's 20 ms TQ allows.
+  F: { id: 0x06, name: 'F — ultrasonic',      fR: 20250, fD: 21500, guardLo: 19750, guardHi: 22000,
+       note: 'Inaudible to people; dogs and cats hear it. Needs 48 kHz audio. Shortest range.' },
+  G: { id: 0x07, name: 'G — bass',            fR: 150,   fD: 212.5, guardLo: 125,   guardHi: 237.5,
+       note: 'Lowest pitch: more felt than heard, and quiet to the ear. T2 only. Competes with HVAC and traffic rumble.' },
 };
+
+/**
+ * How close to the Nyquist limit a band's top guard may sit. Converters'
+ * anti-alias filters start well before it: at 48 kHz a MacBook Pro's
+ * speaker-to-microphone path is flat to 22.75 kHz and 18 dB down at 23 kHz.
+ */
+const NYQUIST_USE = 0.46;
+
+/** Whether audio at `fs` Hz can carry `band` — spec §4.2. */
+export const bandFitsRate = (band, fs) => BANDS[band].guardHi <= NYQUIST_USE * fs;
+
+/** The lowest standard sample rate that carries `band`. */
+export const sampleRateFor = (band) => [8000, 16000, 44100, 48000, 96000].find((fs) => bandFitsRate(band, fs));
 
 /**
  * Bit-timing profiles — spec §5.2. Segment lengths are in time quanta.

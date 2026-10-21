@@ -8,14 +8,15 @@
  */
 
 import { AcousticChannel, mulberry32 } from '../../src/tincan/bus.js';
-import { BANDS, PROFILES, timing, maxRange, nearFarMarginDb } from '../../src/tincan/params.js';
+import { BANDS, PROFILES, timing, maxRange, nearFarMarginDb, sampleRateFor } from '../../src/tincan/params.js';
 import { SCENARIOS } from './scenarios.js';
 import { formatFrame } from '../../src/tincan/frame.js';
 import { $, el, LogView, topbar, escapeHtml, fitProfiles } from '../ui.js';
 
 $('#chrome').replaceWith(topbar('Simulator'));
 
-const SIM_RATE = 16000;   // enough for bands A, C, D and E; band B needs more
+/** The simulation's sample rate: 16 kHz where it is enough, which is most bands, since it is three times faster. */
+const simRate = () => Math.max(16000, sampleRateFor(bandSel.value));
 
 /* ---------------------------------------------------------------- */
 /* scenarios                                                         */
@@ -131,7 +132,7 @@ async function run() {
   ];
 
   const ch = new AcousticChannel({
-    sampleRate: SIM_RATE,
+    sampleRate: simRate(),
     band: bandSel.value,
     profile: profSel.value,
     noise: Number($('#noise').value) / 2000,
@@ -155,6 +156,7 @@ async function run() {
   }
 
   const script = (s.script || []).map((step) => ({ ...step, done: false }));
+  const SIM_RATE = simRate();
   const totalSamples = Math.round(duration * SIM_RATE);
   const chunk = Math.round(SIM_RATE * 0.05);
   let done = 0;

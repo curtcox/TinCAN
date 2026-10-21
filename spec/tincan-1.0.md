@@ -168,8 +168,10 @@ out-of-band configuration; TinCAN has no in-band band negotiation.
 | `0x02` | **B — near-ultrasonic** | 17250 Hz | 18500 Hz | 16750 Hz | 19000 Hz | Requires ≥44.1 kHz sampling and hardware with usable response above 17 kHz. Inaudible to most adults. Range is short and highly directional. |
 | `0x03` | **C — low** | 1000 Hz | 2250 Hz | 500 Hz | 2750 Hz | For small transducers and poor high-frequency response. Most exposed to ambient noise (speech, HVAC, traffic). |
 | `0x04` | **D — line** | 6000 Hz | 7250 Hz | 5500 Hz | 7750 Hz | For a physical audio cable between devices, or a loopback device. Not intended for air. |
-| `0x05` | **E — deep** | 650 Hz | 900 Hz | 550 Hz | 1000 Hz | The lowest pitch: diffracts round corners and through doorways best, and is absorbed least by air. Needs a speaker with real output below 1 kHz. Sits among the vowels of speech. **`TQ` ≥ 5 ms only** (`T10` and slower). |
-| `0x00`, `0x06`–`0xEF` | reserved | | | | | |
+| `0x05` | **E — deep** | 650 Hz | 900 Hz | 550 Hz | 1000 Hz | Diffracts round corners and through doorways well, and is absorbed little by air. Needs a speaker with real output below 1 kHz. Sits among the vowels of speech. **`TQ` ≥ 5 ms only** (`T10` and slower). |
+| `0x06` | **F — ultrasonic** | 20250 Hz | 21500 Hz | 19750 Hz | 22000 Hz | Inaudible to people; dogs and cats hear it. **Requires 48 kHz sampling.** Range is short and highly directional. |
+| `0x07` | **G — bass** | 150 Hz | 212.5 Hz | 125 Hz | 237.5 Hz | Felt as much as heard, and faint to the ear; carries through walls and floors. Needs a speaker with real output down to 125 Hz. Competes with HVAC, traffic and mains hum. **`TQ` ≥ 20 ms only** (`T2`). |
+| `0x00`, `0x08`–`0xEF` | reserved | | | | | |
 | `0xF0`–`0xFF` | experimental | | | | | Available for private use; MUST NOT be assumed interoperable. |
 
 Tone frequencies are chosen so that no harmonic of `f_R` falls on `f_D` or on
@@ -192,10 +194,22 @@ min(f_R − guard_lo,
 ```
 
 Band E is the same layout at a fifth of the scale, which is how it fits below
-1 kHz, so it needs `TQ` ≥ 5 ms. A node MUST NOT run a band at a profile whose
+1 kHz, so it needs `TQ` ≥ 5 ms; band G is it at a twentieth, the lowest `T2`
+allows, so it needs `TQ` ≥ 20 ms. A node MUST NOT run a band at a profile whose
 `TQ` is shorter than this. In the reference simulation band E carries frames and
 arbitrates at `T10`, `T5`, `T4` and `T2` as bands A and C do, and fails at `T25`
-and faster.
+and faster; band G does at `T2`.
+
+**Band layout and the sample rate.** Converters' anti-alias filters cut in well
+before the Nyquist limit: at 48 kHz a MacBook Pro's speaker-to-microphone path
+is flat to 22.75 kHz and 18 dB down at 23 kHz. A node MUST NOT run a band whose
+upper guard is above 0.46 of its sample rate: band B needs 44.1 kHz, band F
+48 kHz, the others 16 kHz.
+
+Bands F and G sit at the top and bottom of what that MacBook Pro's built-in
+speaker and microphone carry evenly: within 4 dB from 19 to 22.75 kHz, and from
+100 to 400 Hz. Below 100 Hz its response falls by about 6 dB every twelfth of an
+octave.
 
 ### 4.3 Transmitter requirements
 

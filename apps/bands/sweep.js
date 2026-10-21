@@ -18,9 +18,17 @@ export const SWEEP = {
   edge: 0.015,      // left out of each tone's reading at either end
 };
 
-/** Above this many dB over the room's noise a frequency carries well; above the other, short range. */
+/**
+ * A frequency carries well when it arrives this many dB above the room's
+ * noise and within FLAT_DB of the device's typical level; it is usable at the
+ * looser pair. Height above noise alone is not enough: near the Nyquist limit
+ * the converters' filters cut the noise as deeply as the tone, so a tone 77 dB
+ * down can still stand 90 dB above it, and will not carry across a room.
+ */
 export const CARRIES_DB = 30;
 export const USABLE_DB = 15;
+export const FLAT_DB = 20;
+export const USABLE_FLAT_DB = 30;
 
 /**
  * The frequencies: twelfths of an octave below 1 kHz, where speakers give
@@ -99,14 +107,21 @@ export function analyseSweep(rec, fs, plan) {
     return { f, gainDb: db(level / AMPLITUDE), snrDb: db(level) - db(noise) };
   }).sort((a, b) => a.f - b.f);
 
-  // Outward from the strongest frequency, as far as each threshold holds unbroken.
+  // The device's typical level, and outward from the strongest frequency as
+  // far as each pair of thresholds holds unbroken.
+  const gains = points.map((p) => p.gainDb).sort((a, b) => a - b);
+  const typicalDb = gains[gains.length >> 1];
   const peak = points.reduce((best, p, i) => (p.snrDb > points[best].snrDb ? i : best), 0);
-  const range = (min) => {
-    if (points[peak].snrDb < min) return null;
+  const range = (minSnr, flat) => {
+    const ok = (p) => p.snrDb >= minSnr && p.gainDb >= typicalDb - flat;
+    if (!ok(points[peak])) return null;
     let lo = peak, hi = peak;
-    while (lo > 0 && points[lo - 1].snrDb >= min) lo--;
-    while (hi < points.length - 1 && points[hi + 1].snrDb >= min) hi++;
+    while (lo > 0 && ok(points[lo - 1])) lo--;
+    while (hi < points.length - 1 && ok(points[hi + 1])) hi++;
     return { low: points[lo].f, high: points[hi].f };
   };
-  return { latency, points, carries: range(CARRIES_DB), usable: range(USABLE_DB) };
+  return {
+    latency, points, typicalDb,
+    carries: range(CARRIES_DB, FLAT_DB), usable: range(USABLE_DB, USABLE_FLAT_DB),
+  };
 }

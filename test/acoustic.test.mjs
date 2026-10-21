@@ -11,6 +11,7 @@ import assert from 'node:assert/strict';
 import { AcousticChannel, mulberry32 } from '../src/tincan/bus.js';
 import {
   maxRange, nearFarMarginDb, timing, PROFILES, BANDS, fastestProfileFor, minTqMs, profileFitsBand,
+  bandFitsRate, sampleRateFor,
 } from '../src/tincan/params.js';
 import { Phy } from '../src/tincan/phy.js';
 
@@ -641,12 +642,15 @@ test('at T2 a receiver loses the frame when its input arrives a tenth of a secon
 });
 
 test('band E, below 1 kHz, carries frames and arbitrates at T10 and slower, and refuses faster', () => {
-  assert.deepEqual(Object.keys(BANDS).map(minTqMs), [1, 1, 1, 1, 5], 'A–D allow every profile; E needs TQ ≥ 5 ms');
+  assert.deepEqual(Object.keys(BANDS).map(minTqMs), [1, 1, 1, 1, 5, 1, 20],
+    'A–D and F allow every profile; E needs TQ ≥ 5 ms, G 20 ms');
   assert.ok(BANDS.E.guardHi <= BANDS.C.fR, 'every frequency E uses is below band C\'s lowest tone');
+  // §4.2: no harmonic of f_R on f_D or a guard. Band C's second comes closest,
+  // 250 Hz from its f_D at a 1 ms TQ; narrower bands scale that down.
   for (const b of Object.values(BANDS)) {
     for (const k of [2, 3, 4, 5]) {
       for (const f of [b.fD, b.guardLo, b.guardHi]) {
-        assert.ok(Math.abs(k * b.fR - f) >= 250, `${b.name}: harmonic ${k} of f_R is clear of ${f} Hz`);
+        assert.ok(Math.abs(k * b.fR - f) >= 250 / minTqMs(b), `${b.name}: harmonic ${k} of f_R is clear of ${f} Hz`);
       }
     }
   }
@@ -675,4 +679,42 @@ test('band E, below 1 kHz, carries frames and arbitrates at T10 and slower, and 
       assert.equal(s.bitErrors + s.stuffErrors + s.crcErrors + s.formErrors + s.ackErrors, 0, `${profile}: no errors`);
     }
   }
+});
+
+/** Three nodes on `band` at `profile` contend after a primer frame; all delivered, nothing lost. */
+function contendOn(band, profile, { sampleRate = 16000, latencyMs = 0 } = {}) {
+  const ch = channel({
+    sampleRate, band, profile, deviceLatencyMs: latencyMs, selfDelayMs: 0.5,
+    nodes: [{ name: 'primer', x: 0.4, y: -0.3 }, { name: 'lo', x: 0, y: 0 }, { name: 'hi', x: 1, y: 0 }],
+  });
+  const [primer, lo, hi] = ch.protocols;
+  const bit = timing(profile).bitTime;
+  ch.run(0.5);
+  primer.send({ id: 0x7ff, data: [0] });
+  assert.ok(ch.runUntil(() => primer.transmitting, 100 * bit), `${band} ${profile}: primer never got the bus`);
+  ch.run(20 * bit);
+  lo.send({ id: 0x201, data: [1, 2, 3] });
+  hi.send({ id: 0x205, data: [2] });
+  ch.run(220 * bit);
+  assert.equal(hi.stats.arbitrationsLost, 1, `${band} ${profile}: the higher identifier withdrew`);
+  assert.deepEqual([primer, lo, hi].map((p) => p.stats.framesSent), [1, 1, 1], `${band} ${profile}: every frame delivered`);
+  for (const p of [primer, lo, hi]) {
+    const s = p.stats;
+    assert.equal(s.bitErrors + s.stuffErrors + s.crcErrors + s.formErrors + s.ackErrors, 0, `${band} ${profile}: no errors`);
+  }
+}
+
+test('band F, at the top of 48 kHz audio, arbitrates at T100 and needs 48 kHz', () => {
+  assert.equal(sampleRateFor('F'), 48000, 'at 44.1 kHz the converters\' filters reach 22 kHz');
+  assert.equal(sampleRateFor('B'), 44100);
+  assert.equal(sampleRateFor('A'), 16000);
+  assert.equal(bandFitsRate('F', 44100), false);
+  assert.ok(BANDS.F.fR - BANDS.B.guardHi >= 1250 && BANDS.F.guardLo - BANDS.B.fD >= 1250, 'and clear of band B');
+  contendOn('F', 'T100', { sampleRate: 48000 });
+});
+
+test('band G, at 150 Hz, arbitrates at T2 and refuses anything faster', () => {
+  assert.equal(fastestProfileFor(60, 'G'), 'T2');
+  assert.throws(() => new Phy({ sampleRate: 16000, band: 'G', profile: 'T4' }), /band G needs a time quantum of at least 20 ms/);
+  contendOn('G', 'T2', { latencyMs: 60 });
 });

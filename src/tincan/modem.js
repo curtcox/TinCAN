@@ -6,7 +6,7 @@
  * runs the actual protocol (see worklet.js); it does no protocol work itself.
  */
 
-import { BANDS, PROFILES, timing, maxRange } from './params.js';
+import { BANDS, PROFILES, timing, maxRange, bandFitsRate, sampleRateFor } from './params.js';
 
 const WORKLET_URL = new URL('./worklet.js', import.meta.url);
 
@@ -58,7 +58,7 @@ export async function audioConstraints(deviceId) {
 export class Modem extends EventTarget {
   /**
    * @param {object} [opts]
-   * @param {'A'|'B'|'C'|'D'|'E'} [opts.band]
+   * @param {'A'|'B'|'C'|'D'|'E'|'F'|'G'} [opts.band]
    * @param {'T100'|'T50'|'T25'|'T10'|'T5'|'T4'|'T2'} [opts.profile]
    * @param {'node'|'listener'} [opts.mode]
    * @param {number} [opts.amplitude]
@@ -116,6 +116,11 @@ export class Modem extends EventTarget {
     this._checkCaptureSettings();
 
     this.ctx = new (window.AudioContext || window.webkitAudioContext)(CONTEXT_OPTIONS);
+    if (!bandFitsRate(this.opts.band, this.ctx.sampleRate)) {
+      const fs = this.ctx.sampleRate;
+      await this.stop();
+      throw new Error(`band ${this.opts.band} needs audio at ${sampleRateFor(this.opts.band)} Hz or more; this device runs at ${fs} Hz`);
+    }
     if (this.ctx.state === 'suspended') await this.ctx.resume();
     // Some browsers fire statechange without the state changing; report changes only.
     // Read the state from this context, not this.ctx, which stop() clears

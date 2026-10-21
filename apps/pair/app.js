@@ -6,7 +6,7 @@
  */
 
 import { Modem, checkSupport } from '../../src/tincan/modem.js';
-import { BANDS, PROFILES, timing, longestRangeProfile, bandsCompatible } from '../../src/tincan/params.js';
+import { BANDS, PROFILES, timing, longestRangeProfile, bandsCompatible, bandFitsRate } from '../../src/tincan/params.js';
 import { formatFrame } from '../../src/tincan/frame.js';
 import {
   Session, describeControl, parseBaseId, TOPIC, assessProposal, DECLINE_TEXT, CLOSE_TEXT,
@@ -47,7 +47,7 @@ function describePlan() {
   if (!PROFILES[main] || !PROFILES[link] || !BANDS[$('#band').value] || !BANDS[$('#linkband').value]) return;
   const ok = bandsCompatible($('#band').value, main, $('#linkband').value, link);
   $('#plan').innerHTML = `About ${Math.round(budgetSeconds() / 2 / 60)}–${Math.ceil(budgetSeconds() / 60)} minutes. `
-    + `${$('#band').value !== 'B' || $('#linkband').value !== 'B' ? '<b>Some of it is audible.</b> ' : ''}`
+    + `${![$('#band').value, $('#linkband').value].every((b) => b === 'B' || b === 'F') ? '<b>Some of it is audible.</b> ' : ''}`
     + (ok ? '' : '<b>These two can not share a device (Part 2 §8.2): bob will decline.</b>');
 }
 $('#band').addEventListener('change', () => fitProfiles($('#profile'), $('#band').value));
@@ -249,7 +249,7 @@ $('#start').addEventListener('click', async () => {
       check('proposal');
       const reason = assessProposal(rec, {
         mainBand: run.settings.band, mainProfile: run.settings.profile, slopMs: null,
-        linksInUse: bob.session.linksInUse(), canUseBand: (b) => b !== 'B' || bob.modem.ctx.sampleRate >= 44100,
+        linksInUse: bob.session.linksInUse(), canUseBand: (b) => bandFitsRate(b, bob.modem.ctx.sampleRate),
       });
       if (reason) {
         bob.session.declineLink(rec, reason);

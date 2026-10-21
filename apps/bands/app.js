@@ -1,16 +1,18 @@
 /**
- * TinCAN Bands — how the five bands compare in loudness, reach and capacity,
+ * TinCAN Bands — how the bands compare in loudness, reach and capacity,
  * computed from the band plan and the standards in acoustics.js, plus a way
  * to hear and measure them on this device.
  */
 
 import {
-  BANDS, PROFILES, timing, maxRange, bandsCompatible, profileFitsBand, nearFarMarginDb,
+  BANDS, PROFILES, timing, maxRange, bandsCompatible, profileFitsBand, nearFarMarginDb, bandFitsRate, sampleRateFor,
 } from '../../src/tincan/params.js';
 import { CONTEXT_OPTIONS, audioConstraints } from '../../src/tincan/modem.js';
 import { $, el, topbar, escapeHtml } from '../ui.js';
 import { toneAmplitude, AMPLITUDE } from '../selftest/probe.js';
-import { sweepPlan, sweepSignal, analyseSweep, CARRIES_DB, USABLE_DB } from './sweep.js';
+import {
+  sweepPlan, sweepSignal, analyseSweep, CARRIES_DB, USABLE_DB, FLAT_DB, USABLE_FLAT_DB,
+} from './sweep.js';
 import {
   phon, hearingThreshold, aWeighting, airAbsorption, shannon, toneBalance, TIGHT_RATIO,
 } from './acoustics.js';
@@ -35,6 +37,10 @@ const HEARD_BY = {
   D: 'Everyone with normal hearing, a little less keenly than A.',
   E: 'Everyone with normal hearing, less keenly than A or C. It sits among the vowels of speech, so it is '
     + 'easily masked by talk and blends into it rather than standing out.',
+  F: 'Practically nobody: adult hearing ends below 20 kHz, and even young adults rarely hear past it. '
+    + 'Dogs and cats hear it easily, and some find it unpleasant.',
+  G: 'Everyone, but faintly: at 150 Hz the ear needs about 20 dB more sound to hear a tone than at 3 kHz. '
+    + 'Low notes carry through walls and floors, and are felt as much as heard.',
 };
 
 function table(node, head, rows) {
@@ -126,11 +132,12 @@ table($('#capacity'),
       [20, 30, 40].map((s) => `${(shannon(slotHz(b), s) / 1000).toFixed(0)}`).join(' / ') + ' kbit/s',
       `${(100 * timing(top).bitRate / c30).toFixed(2)} % <span class="muted">of it at 30 dB, at ${top}</span>`,
       others.join(', '),
-      b === 'B' ? 'a sample rate of 44.1 kHz or more, and a speaker and microphone that reach 19 kHz'
-        : b === 'D' ? 'nothing in principle; intended for a cable'
-          : b === 'E' ? `${top} or slower, since its tones are a fifth as far apart; and a speaker with real `
-            + 'output below 1 kHz, which a phone\'s or a thin laptop\'s may barely have'
-            : 'nothing special',
+      [
+        sampleRateFor(b) > 16000 && `audio at ${hz(sampleRateFor(b))} or more, and a speaker and microphone that reach ${hz(BANDS[b].guardHi)}`,
+        top !== 'T100' && `${top} or slower, since its tones are ${BANDS[b].fD - BANDS[b].fR} Hz apart, not 1250`,
+        BANDS[b].guardHi < 1500 && `a speaker with real output down to ${hz(BANDS[b].guardLo)}, which a phone's or a thin laptop's may barely have`,
+        b === 'D' && 'nothing in principle; intended for a cable',
+      ].filter(Boolean).join('; ') || 'nothing special',
     ];
   }));
 
@@ -163,7 +170,7 @@ for (const b of KEYS) {
     onclick: async () => {
       if (playing) { playing.ctx.close(); playing = null; }
       const ctx = new (window.AudioContext || window.webkitAudioContext)(CONTEXT_OPTIONS);
-      if (BANDS[b].guardHi * 2 > ctx.sampleRate) {
+      if (!bandFitsRate(b, ctx.sampleRate)) {
         $('#playstate').textContent = `band ${b} needs a higher sample rate than ${ctx.sampleRate} Hz`;
         ctx.close();
         return;
@@ -290,7 +297,7 @@ $('#measure').addEventListener('click', async () => {
   $('#measurestate').className = 'pill live';
   try {
     const { rec, fs, label, bands, plan } = await playAndRecord((fs) => {
-      const bands = KEYS.filter((b) => BANDS[b].guardHi * 2 <= fs);
+      const bands = KEYS.filter((b) => bandFitsRate(b, fs));
       const plan = schedule(bands);
       return { bands, plan, signal: measureSignal(fs, plan), seconds: plan.seconds };
     });
@@ -349,39 +356,37 @@ const svg = (tag, attrs = {}) => {
   return n;
 };
 
-/** Height above the room's noise against frequency, on a log axis, with the two thresholds. */
-function drawRange(points) {
-  const W = 720, H = 260, L = 44, R = 12, T = 12, B = 34;
+/**
+ * One measure against frequency, on a log axis, with dashed threshold lines:
+ * `key` of each point, `rules` as [value, name] pairs, `lo`–`hi` the scale.
+ */
+function drawSweep(points, key, title, rules, lo, hi) {
+  const W = 720, H = 220, L = 44, R = 12, T = 18, B = 30;
   const fMin = 40, fMax = Math.max(...points.map((p) => p.f));
-  const yMax = Math.max(60, Math.ceil(Math.max(...points.map((p) => p.snrDb)) / 20) * 20);
   const x = (f) => L + ((Math.log(f) - Math.log(fMin)) / (Math.log(fMax) - Math.log(fMin))) * (W - L - R);
-  const y = (v) => T + (1 - Math.max(0, Math.min(yMax, v)) / yMax) * (H - T - B);
-  const root = svg('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img',
-    'aria-label': 'Height above the room\'s noise against frequency', style: 'max-width:46rem;display:block;font-family:var(--sans)' });
-  for (let v = 0; v <= yMax; v += 20) {
-    root.append(svg('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: 'var(--line)', 'stroke-width': 1 }));
-    const t = svg('text', { x: L - 6, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--faint)' });
-    t.textContent = `${v}`;
+  const y = (v) => T + (1 - (Math.max(lo, Math.min(hi, v)) - lo) / (hi - lo)) * (H - T - B);
+  const root = svg('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': `${title} against frequency`,
+    style: 'max-width:46rem;display:block;font-family:var(--sans);margin-top:.5rem' });
+  const text = (x0, y0, str, attrs = {}) => {
+    const t = svg('text', { x: x0, y: y0, 'font-size': 11, fill: 'var(--faint)', ...attrs });
+    t.textContent = str;
     root.append(t);
+  };
+  for (let v = lo; v <= hi; v += 20) {
+    root.append(svg('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: 'var(--line)', 'stroke-width': 1 }));
+    text(L - 6, y(v) + 4, `${v}`, { 'text-anchor': 'end' });
   }
   for (const f of [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].filter((f) => f <= fMax)) {
-    const t = svg('text', { x: x(f), y: H - B + 16, 'text-anchor': 'middle', 'font-size': 11, fill: 'var(--faint)' });
-    t.textContent = f >= 1000 ? `${f / 1000}k` : `${f}`;
-    root.append(t);
+    text(x(f), H - B + 16, f >= 1000 ? `${f / 1000}k` : `${f}`, { 'text-anchor': 'middle' });
   }
-  const axis = svg('text', { x: W - R, y: H - 4, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--dim)' });
-  axis.textContent = 'Hz';
-  const yAxis = svg('text', { x: L, y: T - 2, 'font-size': 11, fill: 'var(--dim)' });
-  yAxis.textContent = 'dB above the room\'s noise';
-  root.append(axis);
-  for (const [v, name] of [[CARRIES_DB, 'carries well'], [USABLE_DB, 'usable']]) {
+  text(W - R, H - 2, 'Hz', { 'text-anchor': 'end', fill: 'var(--dim)' });
+  text(L, T - 6, title, { fill: 'var(--dim)' });
+  for (const [v, name] of rules) {
     root.append(svg('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: 'var(--dim)', 'stroke-width': 1, 'stroke-dasharray': '4 3' }));
-    const t = svg('text', { x: W - R, y: y(v) - 4, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--dim)' });
-    t.textContent = name;
-    root.append(t);
+    text(W - R, y(v) - 4, name, { 'text-anchor': 'end', fill: 'var(--dim)' });
   }
   root.append(svg('path', {
-    d: points.map((p, i) => `${i ? 'L' : 'M'}${x(p.f).toFixed(1)},${y(p.snrDb).toFixed(1)}`).join(''),
+    d: points.map((p, i) => `${i ? 'L' : 'M'}${x(p.f).toFixed(1)},${y(p[key]).toFixed(1)}`).join(''),
     fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2, 'stroke-linejoin': 'round',
   }));
   // A hover target per frequency, wider than the line.
@@ -392,8 +397,16 @@ function drawRange(points) {
     hit.append(tip);
     root.append(hit);
   }
-  root.prepend(yAxis);
-  $('#sweepchart').replaceChildren(root);
+  return root;
+}
+
+function drawRange(r) {
+  const top = Math.max(60, Math.ceil(Math.max(...r.points.map((p) => p.snrDb)) / 20) * 20);
+  const floor = Math.min(-60, Math.floor(Math.min(...r.points.map((p) => p.gainDb)) / 20) * 20);
+  $('#sweepchart').replaceChildren(
+    drawSweep(r.points, 'snrDb', 'dB above the room\'s noise', [[CARRIES_DB, 'carries well'], [USABLE_DB, 'usable']], 0, top),
+    drawSweep(r.points, 'gainDb', 'dB speaker to microphone',
+      [[r.typicalDb, 'typical'], [r.typicalDb - FLAT_DB, 'carries well'], [r.typicalDb - USABLE_FLAT_DB, 'usable']], floor, 0));
 }
 
 $('#sweep').addEventListener('click', async () => {
@@ -408,10 +421,11 @@ $('#sweep').addEventListener('click', async () => {
     });
     const r = analyseSweep(rec, fs, plan);
     const span = (x) => (x ? `${hz(x.low)} to ${hz(x.high)}` : 'nowhere');
-    $('#sweepresult').innerHTML = `Carries well (${CARRIES_DB} dB or more above the room's noise) from `
-      + `<b>${span(r.carries)}</b>; usable (${USABLE_DB} dB) from <b>${span(r.usable)}</b>. `
+    $('#sweepresult').innerHTML = `Carries well (${CARRIES_DB} dB or more above the room's noise, and within `
+      + `${FLAT_DB} dB of this device's typical ${fmt(r.typicalDb, 0)} dB) from <b>${span(r.carries)}</b>; `
+      + `usable (${USABLE_DB} dB, within ${USABLE_FLAT_DB} dB) from <b>${span(r.usable)}</b>. `
       + `Measured at ${fs} Hz, ${(r.latency * 1000).toFixed(0)} ms speaker to microphone. Hover the line for each frequency.`;
-    drawRange(r.points);
+    drawRange(r);
     table($('#sweeptable'), ['Frequency', 'Speaker to microphone', 'Above the room\'s noise'],
       r.points.map((p) => [hz(p.f), `${signed(p.gainDb, 0)} dB`, `${fmt(p.snrDb, 0)} dB`]));
     $('#sweepdetails').hidden = false;

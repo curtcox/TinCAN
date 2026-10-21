@@ -5,7 +5,7 @@
 import { Modem, checkSupport } from '../../src/tincan/modem.js';
 import {
   BANDS, PROFILES, DETECTOR_DEFAULTS, timing, maxRange, fastestProfileFor, longestRangeProfile, bandsCompatible,
-  minTqMs, profileFitsBand,
+  minTqMs, profileFitsBand, bandFitsRate,
 } from '../../src/tincan/params.js';
 import { buildTransmission, formatFrame } from '../../src/tincan/frame.js';
 import {
@@ -78,7 +78,7 @@ function describePhy() {
     `${b.fR} Hz recessive, ${b.fD} Hz dominant. `
     + `${Math.round(t.bitRate)} bit/s — an 8-octet frame takes about `
     + `${(123 / t.bitRate).toFixed(1)} s of bus time. ${range}`
-    + (bandSel.value !== 'B' ? ' <b>This band is audible.</b>' : '')
+    + (!['B', 'F'].includes(bandSel.value) ? ' <b>This band is audible.</b>' : '')
     + (minTqMs(bandSel.value) > 1 ? ` Band ${bandSel.value} needs ${Object.keys(PROFILES).find((p) => profileFitsBand(bandSel.value, p))} or slower.` : '');
   updateHints();
 }
@@ -699,6 +699,7 @@ function describeLink() {
     notes.push('This device\'s audio path is not measured, so the peer will judge the timing alone.');
   }
   if (band === 'B') notes.push('Band B needs a speaker and microphone that work above 17 kHz, and carries only a few metres.');
+  if (band === 'F') notes.push('Band F needs 48 kHz audio and a speaker and microphone that work above 20 kHz, and carries only a few metres.');
   $('#linknote').innerHTML = notes.join(' ');
 }
 
@@ -760,7 +761,7 @@ $('#linkclose').addEventListener('click', () => {
 });
 
 function onProposal(rec) {
-  const canUseBand = (b) => b !== 'B' || (modem?.ctx?.sampleRate ?? 48000) >= 44100;
+  const canUseBand = (b) => bandFitsRate(b, modem?.ctx?.sampleRate ?? 48000);
   const reason = link ? DECLINE.BUSY : assessProposal(rec, {
     mainBand: bandSel.value, mainProfile: profSel.value, slopMs: mySlop(rec.profile ?? profSel.value),
     linksInUse: session.linksInUse(), canUseBand,

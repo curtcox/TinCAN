@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TinCAN Bands</title>
-<meta name="description" content="How TinCAN's five bands compare: how loud each seems and to whom, how far it carries, and how much data it can carry.">
+<meta name="description" content="How TinCAN's bands compare: how loud each seems and to whom, how far it carries, and how much data it can carry.">
 <link rel="stylesheet" href="../../style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🥫</text></svg>">
 </head>
@@ -17,9 +17,9 @@
     Every TinCAN band is two tones, recessive and dominant, with a guard tone either side to measure the
     noise (<a href="../../spec/tincan-1.0.html#42-band-plans">Part 1 §4.2</a>). The band decides who can hear
     the bus, how far it carries and what it competes with. It barely decides how fast the bus runs: the
-    bit-timing profile does, at the same rate on every band. The one exception is band E, whose tones sit
-    250 Hz apart instead of 1250 Hz so as to fit below 1 kHz: telling them apart takes five times longer,
-    so it runs T10 and slower only.
+    bit-timing profile does, at the same rate on every band. The exceptions are the lowest bands, whose tones
+    sit closer together so as to fit where they are: E's 250 Hz apart instead of 1250 Hz, so telling them
+    apart takes five times longer and it runs T10 and slower only, and G's 62.5 Hz apart, so it runs T2 only.
   </p>
 
   <div class="panel">

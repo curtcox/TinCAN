@@ -68,6 +68,10 @@ test('a proposal is judged by band, by what can share the devices, and by both a
     null, 'D beside a link on E');
   for (const p of ['T10', 'T2']) assert.equal(bandsCompatible('C', p, 'E', p), false, `C and E at ${p}`);
   for (const o of ['A', 'B', 'D']) assert.equal(bandsCompatible(o, 'T100', 'E', 'T10'), true, `${o} at any profile beside E`);
+  // F sits 1250 Hz clear of B; G only runs T2, slow enough to share with anything but itself.
+  assert.equal(bandsCompatible('B', 'T100', 'F', 'T100'), true, 'B and F');
+  for (const o of ['A', 'B', 'C', 'D', 'E', 'F']) assert.equal(bandsCompatible(o, 'T2', 'G', 'T2'), true, `${o} beside G`);
+  assert.equal(assessProposal({ band: 'G', profile: 'T5', slopMs: 62 }, laptop), DECLINE.TIMING, 'G is T2 only');
   assert.equal(linkTimeout('T100'), 10, 'at least ten seconds');
   assert.ok(Math.abs(linkTimeout('T5') - 79.2) < 1e-9, 'four 5-octet frames');
 });
