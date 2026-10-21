@@ -1,3 +1,6 @@
 _site/
 node_modules/
 .DS_Store
+runs/
+.rig/
+rig-hosts.json

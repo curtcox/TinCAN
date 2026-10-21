@@ -1,0 +1,202 @@
+#!/usr/bin/env node
+/**
+ * The rig's command line — spec/rig.md §7. Talks to the control API the
+ * server exposes on 127.0.0.1 (RIG_CONTROL env to point it elsewhere);
+ * it never touches the devices' HTTPS port itself.
+ */
+
+import http from 'node:http';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const BASE = process.env.RIG_CONTROL || 'http://127.0.0.1:8444';
+const HOSTS_FILE = resolve(dirname(fileURLToPath(import.meta.url)), '../rig-hosts.json');
+
+const print = (obj) => console.log(JSON.stringify(obj, null, 2));
+
+function call(method, path, body) {
+  return new Promise((ok, fail) => {
+    const req = http.request(BASE + path, {
+      method,
+      headers: body === undefined ? {} : { 'Content-Type': 'application/json' },
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => {
+        const text = Buffer.concat(chunks).toString();
+        let json = null;
+        try { json = JSON.parse(text); } catch { /* SSE and empty replies */ }
+        ok({ status: res.statusCode, json, text });
+      });
+    });
+    req.on('error', (err) => {
+      if (err.code === 'ECONNREFUSED') {
+        console.error(`the rig server is not running on ${BASE}; start it with node tools/rig/server.mjs`);
+        process.exit(1);
+      }
+      fail(err);
+    });
+    if (body !== undefined) req.write(JSON.stringify(body));
+    req.end();
+  });
+}
+
+const get = (path) => call('GET', path);
+const post = (path, body) => call('POST', path, body);
+
+function check(r) {
+  if (r.status >= 400) {
+    console.error(`${r.status}: ${r.text}`);
+    process.exit(1);
+  }
+  return r.json;
+}
+
+const notYet = () => {
+  console.log('not implemented yet: step 5');
+  process.exit(2);
+};
+
+/** Host aliases for the SSH commands (step 5); absent until the file exists. */
+const hosts = () => {
+  try { return JSON.parse(readFileSync(HOSTS_FILE, 'utf8')); } catch { return {}; }
+};
+
+function fmtTime(ms) {
+  const d = new Date(ms);
+  const p = (n, w = 2) => String(n).padStart(w, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+}
+
+/** One line per joined device: id, online, name, and its audio info. */
+function printDevices(list) {
+  for (const d of list) {
+    const a = d.info?.audio ?? {};
+    const bits = [
+      a.sampleRate && `${a.sampleRate} Hz`,
+      a.label || a.microphone,
+      a.echoCancellation !== undefined && `echoCancellation ${a.echoCancellation}`,
+      a.noiseSuppression !== undefined && `noiseSuppression ${a.noiseSuppression}`,
+      a.autoGainControl !== undefined && `autoGainControl ${a.autoGainControl}`,
+      a.baseLatency !== undefined && `baseLatency ${a.baseLatency}`,
+    ].filter(Boolean).join(', ');
+    console.log(`${d.device}\t${d.online ? 'online' : 'offline'}\t${d.name}${bits ? `\t${bits}` : ''}`);
+  }
+}
+
+/** Follow the control /log stream, one line per event, until Ctrl-C. */
+function followLog() {
+  http.get(`${BASE}/log`, (res) => {
+    res.setEncoding('utf8');
+    let buf = '';
+    res.on('data', (chunk) => {
+      buf += chunk;
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const part of parts) {
+        const event = part.match(/^event: (.*)$/m)?.[1];
+        const data = part.match(/^data: (.*)$/m)?.[1];
+        if (event === 'log' && data) {
+          const e = JSON.parse(data);
+          console.log(`${fmtTime(e.serverTime)} ${e.device ?? ''} ${e.id ?? ''} ${e.type ?? ''} ${e.detail ? JSON.stringify(e.detail) : ''}`.replace(/\s+/g, ' ').trim());
+        }
+      }
+    });
+    res.on('end', () => process.exit(0));
+  }).on('error', (err) => {
+    if (err.code === 'ECONNREFUSED') {
+      console.error(`the rig server is not running on ${BASE}; start it with node tools/rig/server.mjs`);
+      process.exit(1);
+    }
+    throw err;
+  });
+}
+
+const usage = `usage: node tools/rig.mjs <command>
+
+  info [host]           the server, or an SSH host from rig-hosts.json
+  devices               joined devices and their audio
+  send <device|all> <description.json|{json}> [--wait [seconds]]
+  wait <id> [seconds]   block until every target's result is in
+  results [id]          one description's results, or every send this session
+  fetch <id>            the record files kept for a description
+  run [name]            the current run, or start a new one
+  log                   follow the event log
+  stop [device|all|host]  stop playback on devices, or SSH-stop a host
+  launch <host>         start a device browser over SSH (step 5)
+
+control API: ${BASE} (RIG_CONTROL to change)`;
+
+async function main(argv) {
+  const [cmd, ...args] = argv;
+  switch (cmd) {
+    case 'info': {
+      if (args.length) notYet();                 // an SSH host's audio
+      print(check(await get('/info')));
+      break;
+    }
+    case 'devices':
+      printDevices(check(await get('/devices')));
+      break;
+    case 'send': {
+      const [to, descArg, ...rest] = args;
+      if (!to || !descArg) { console.error(usage); process.exit(2); }
+      const description = descArg.startsWith('{')
+        ? JSON.parse(descArg)
+        : JSON.parse(readFileSync(resolve(descArg), 'utf8'));
+      const sent = check(await post('/send', { to, description }));
+      print({ id: sent.id, at: sent.at, to: sent.to });
+      const wi = rest.indexOf('--wait');
+      if (wi >= 0) {
+        const seconds = Number(rest[wi + 1]) || 30;
+        print(check(await get(`/wait?id=${sent.id}&timeout=${seconds}`)));
+      }
+      break;
+    }
+    case 'wait': {
+      const [id, seconds = 30] = args;
+      if (!id) { console.error(usage); process.exit(2); }
+      print(check(await get(`/wait?id=${id}&timeout=${seconds}`)));
+      break;
+    }
+    case 'results':
+      print(check(await get(args[0] ? `/results?id=${args[0]}` : '/results')));
+      break;
+    case 'fetch': {
+      const r = check(await get(`/files?id=${args[0]}`));
+      for (const f of r.files) console.log(f);
+      break;
+    }
+    case 'run':
+      if (args[0]) print(check(await post('/run', { name: args.join(' ') })));
+      else print(check(await get('/run')));
+      break;
+    case 'log':
+      followLog();
+      break;
+    case 'stop': {
+      const arg = args[0] ?? 'all';
+      const list = arg === 'all' ? [] : check(await get('/devices'));
+      if (arg === 'all' || list.some((d) => d.device === arg)) {
+        await post('/stop', { to: arg });
+      } else {
+        hosts();                                 // a host alias, not a device: SSH stop
+        notYet();
+      }
+      break;
+    }
+    case 'launch':
+      if (!args[0]) { console.error(usage); process.exit(2); }
+      notYet();
+      break;
+    case 'help': case undefined: case '--help': case '-h':
+      console.log(usage);
+      break;
+    default:
+      console.log(usage);
+      process.exit(2);
+  }
+}
+
+main(process.argv.slice(2)).catch((err) => { console.error(err.message); process.exit(1); });
