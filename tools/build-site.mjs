@@ -60,6 +60,7 @@ const NAV = [
   ['spec/tincan-1.0.html', 'Part 1'],
   ['spec/transport.html', 'Part 2'],
   ['spec/rationale.html', 'Rationale'],
+  ['spec/rig.html', 'Rig'],
   ['spec/vectors.html', 'Test vectors'],
   ['apps/snooper/', 'Snooper'],
   ['apps/console/', 'Console'],
@@ -73,6 +74,7 @@ const PAGES = [
   { src: 'spec/tincan-1.0.md', dest: 'spec/tincan-1.0.html', nav: 'Part 1' },
   { src: 'spec/transport.md', dest: 'spec/transport.html', nav: 'Part 2' },
   { src: 'spec/rationale.md', dest: 'spec/rationale.html', nav: 'Rationale' },
+  { src: 'spec/rig.md', dest: 'spec/rig.html', nav: 'Rig' },
 ];
 
 function layout({ title, description, body, nav, depth }) {

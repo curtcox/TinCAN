@@ -36,7 +36,7 @@ export const BANDS = {
  * anti-alias filters start well before it: at 48 kHz a MacBook Pro's
  * speaker-to-microphone path is flat to 22.75 kHz and 18 dB down at 23 kHz.
  */
-const NYQUIST_USE = 0.46;
+export const NYQUIST_USE = 0.46;
 
 /** Whether audio at `fs` Hz can carry `band` — spec §4.2. */
 export const bandFitsRate = (band, fs) => BANDS[band].guardHi <= NYQUIST_USE * fs;
