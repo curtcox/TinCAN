@@ -63,6 +63,14 @@ class TinCanProcessor extends AudioWorkletProcessor {
     // Optional capture of the last `capture` seconds of input, for diagnosis.
     this.capture = o.capture > 0 ? new Int16Array(Math.round(o.capture * sampleRate)) : null;
     this.captureAt = 0;
+    // Never output exact silence. Given seconds of digital zeros, the browser
+    // or system lets the output go idle and restarts it late: a node silent
+    // for 40 s then heard its own next tone 44 ms later than usual on a
+    // MacBook Pro in Chrome, and about 100 ms in another run — late enough to
+    // misread its own bits at T5. Noise at -100 dBFS, far under any room's,
+    // keeps the output running; with it the delay stayed at its usual 62 ms.
+    this.dither = o.dither ?? 1e-5;
+    this.rng = 0x9e3779b9;
 
     this.port.onmessage = (e) => this._onMessage(e.data);
     this.running = true;
@@ -144,6 +152,14 @@ class TinCanProcessor extends AudioWorkletProcessor {
     if (this.bitLog.length > this.bitLogLimit) this.bitLog.shift();
   }
 
+  /** Uniform noise in [-1, 1), cheaply. */
+  _noise() {
+    let r = this.rng;
+    r ^= r << 13; r ^= r >>> 17; r ^= r << 5;
+    this.rng = r >>> 0;
+    return this.rng / 2147483648 - 1;
+  }
+
   _watchInput(x, i) {
     if (this.capture) {
       this.capture[this.captureAt % this.capture.length] = Math.max(-32768, Math.min(32767, Math.round(x * 32767)));
@@ -173,7 +189,7 @@ class TinCanProcessor extends AudioWorkletProcessor {
       const x = input ? input[i] : 0;
       if (input) this._watchInput(x, i);
       const y = this.phy.processSample(x);
-      if (output) output[i] = this.muted ? 0 : y;
+      if (output) output[i] = (this.muted ? 0 : y) + this.dither * this._noise();
     }
 
     this.frames += n;

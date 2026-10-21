@@ -311,3 +311,17 @@ test('the same reply arbitrates cleanly when each Console hears itself no louder
   assert.deepEqual(collisions, []);
   assert.equal(ada.modem.status.stats.arbitrationsLost, 1);
 });
+
+test('an idle node never outputs exact silence, so the browser keeps its output running', () => {
+  // Given seconds of digital zeros the output goes idle and restarts late:
+  // 44 ms late after 40 s of silence on a MacBook Pro in Chrome.
+  const proc = new Processor({ processorOptions: { name: 'idle', mode: 'node', band: 'A', profile: 'T25' } });
+  const out = new Float32Array(128);
+  let zeros = 0, peak = 0;
+  for (let b = 0; b < 375; b++) {                  // a second of 128-sample blocks, nothing to send
+    proc.process([[new Float32Array(128)]], [[out]]);
+    for (const v of out) { if (v === 0) zeros++; peak = Math.max(peak, Math.abs(v)); }
+  }
+  assert.equal(zeros, 0, 'no exact zeros');
+  assert.ok(peak > 0 && peak <= 1e-5, `peak ${peak}: -100 dBFS at most, far below any room's noise`);
+});

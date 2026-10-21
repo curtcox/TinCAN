@@ -539,6 +539,14 @@ shows the other node's edges arriving early by that much. With the next size
 up, the same two nodes exchanged frames at `T2` with their input on an exact
 grid but for three slips of 5–16 ms.
 
+**Output continuity.** Between transmissions a node SHOULD NOT output exact
+digital silence. Given seconds of it, a browser or operating system may let
+the output go idle and restart it late, so the node's next transmission
+reaches the air — and its own microphone — later than its measured `t_slop`.
+On a MacBook Pro in Chrome a tone after 40 s of silence came 44 ms late in
+one run and about 100 ms in another, more than `T5` can absorb; with noise at
+−100 dBFS output throughout, far below any room's, it came on time.
+
 ### 5.6 Range limit
 
 `PROP_SEG` must cover the round trip, because a node that transmits recessive
