@@ -169,7 +169,8 @@ test('band E shares a device with a bus on A, and not with one on C (Part 2 §8.
   assert.ok(withC.main + withC.link > 0, 'C beside E: they corrupt each other');
 });
 
-test('two laptops agree on the main bus, then talk on a side link, while the main bus carries on', () => {
+/** The scenario below, with the proposer numbering its link `linkNumber`. */
+function twoLaptopsWithALink(linkNumber) {
   // Three slow devices (60 ms audio paths) share band A at T2. Two of them,
   // a metre apart, open a side link on band C at T5, two and a half times
   // faster, with a second Phy each on the same speaker and microphone.
@@ -206,6 +207,7 @@ test('two laptops agree on the main bus, then talk on a side link, while the mai
   linkSessions.a.on('presence', ({ address }) => { if (address === 12) up.add('a'); });
   linkSessions.b.on('presence', ({ address }) => { if (address === 3) up.add('b'); });
 
+  a.nextLink = linkNumber;
   const offer = a.proposeLink({ to: 12, band: 'C', profile: 'T5', slopMs: 60 });
   assert.ok(ch.runUntil(() => opened.length === 2, 400), 'both ends opened the link');
   assert.ok(ch.runUntil(() => up.size === 2, linkTimeout('T5')), 'each heard the other on the link within T_link');
@@ -230,4 +232,16 @@ test('two laptops agree on the main bus, then talk on a side link, while the mai
 
   a.closeLink(offer);
   assert.ok(ch.runUntil(() => b.links.get(`3:${offer.link}`).state === 'closed', 200), 'closed on the main bus');
+}
+
+test('two laptops agree on the main bus, then talk on a side link, while the main bus carries on', () => {
+  twoLaptopsWithALink(1);
+});
+
+test('the side link misses no frame whatever its number', {
+  todo: 'numbered 7 (or 100), the link\'s second frame overlaps c\'s main-bus frame and b-link does not '
+    + 'acknowledge it: A at T2 beside C at T5 is within §8.2\'s rule, and still loses the odd frame; '
+    + 'it is retransmitted, so nothing is lost, but the buses do notice each other',
+}, () => {
+  twoLaptopsWithALink(7);
 });
