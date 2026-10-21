@@ -563,7 +563,8 @@ When the test ends, each player sends `TEST_REPORT`:
 Each level is one octet: −2 × its level in dBFS, rounded and limited to 0–254
 (0.5 dB steps down to −127 dBFS); `255` where this node did not measure it —
 a band it cannot hear. A player that did not play a band shows as that band's
-noise. The level of a player's tones at its own microphone is not reported.
+noise. Noise quieter than −127 dBFS reports as −127 dBFS, so a tone more than
+about 100 dB above it reads a little low: far past anything that matters. The level of a player's tones at its own microphone is not reported.
 
 Reports from 4 players on 7 bands are 59 octets each: nine frames, or about a
 minute at `T25` apiece, during which the main bus is otherwise free.

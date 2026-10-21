@@ -28,7 +28,8 @@ export function modemAudio(modem) {
 export function verdict(p) {
   if (!p) return { text: '—', cls: 'muted', title: 'not measured: this listener cannot run the band' };
   const word = p.snrDb >= 30 ? 'carries well' : p.snrDb >= 15 ? 'usable, short range' : p.snrDb >= 6 ? 'barely' : 'not heard';
-  const tilt = `${p.tiltDb >= 0.5 ? '+' : p.tiltDb <= -0.5 ? '−' : ''}${Math.abs(Math.round(p.tiltDb))} dB`;
+  const r = Math.round(p.tiltDb);
+  const tilt = `${r > 0 ? '+' : r < 0 ? '−' : ''}${Math.abs(r)} dB`;     // never "−0"
   const bal = toneBalance(10 ** (p.levelDb[0] / 20), 10 ** (p.levelDb[1] / 20), MARGIN_DB);
   let cls = p.snrDb >= 30 ? 'ok' : p.snrDb >= 15 ? 'warn' : 'bad';
   let note = word;
