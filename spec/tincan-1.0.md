@@ -832,6 +832,21 @@ If the transmitter reads recessive at the second `ACK` sample point, it has an
 always have acknowledgement errors; this is intended, and is why acknowledgement
 errors drive a node to error-passive but never on their own to bus-off (§8.3).
 
+An acknowledging node reads the `ACK` field too. Its own dominant tone reaches
+its own microphone within its own `t_slop`, so it reads dominant at the second
+`ACK` sample point whether or not anyone else acknowledged. If it reads
+recessive there, its sound is not reaching the air: its output is muted, or
+the browser or operating system has stopped it. Such a node SHOULD report
+this. It MUST NOT treat it as an error of the frame, which it received
+correctly and which another node may have acknowledged. Two Console tabs on
+one laptop at `T4` showed why this is worth saying: one decoded five attempts
+at the other's frame, each with a valid CRC, while the other reported only that
+no node acknowledged. The receiver's events put its form error exactly 4 bit
+times after its CRC delimiter, where hearing its own acknowledgement would have
+moved its clock and made it 20 ms later, and the sender retried with no error
+flag of the receiver's to wait out: the receiver had made no sound at all. The
+next attempt was acknowledged.
+
 ### 6.8 Interframe space
 
 Data and remote frames are separated by the interframe space:

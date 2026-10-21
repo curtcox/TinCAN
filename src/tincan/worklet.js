@@ -18,7 +18,7 @@ import { Phy } from './phy.js';
 const FORWARDED_EVENTS = [
   'frame', 'frame-decoded', 'tx-start', 'tx-complete', 'tx-failed',
   'arbitration-lost', 'error-frame', 'error-state', 'overload',
-  'abandoned', 'bus-off-recovered', 'queued',
+  'abandoned', 'bus-off-recovered', 'queued', 'ack-unheard',
 ];
 
 class TinCanProcessor extends AudioWorkletProcessor {

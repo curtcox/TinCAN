@@ -82,7 +82,7 @@ export class Protocol {
       framesSent: 0, framesReceived: 0,
       arbitrationsLost: 0, arbitrationsWon: 0,
       bitErrors: 0, stuffErrors: 0, crcErrors: 0, formErrors: 0, ackErrors: 0,
-      bitsObserved: 0, bitsDominant: 0, framesAbandoned: 0,
+      bitsObserved: 0, bitsDominant: 0, framesAbandoned: 0, acksUnheard: 0,
     };
 
     this.decoder = new FrameDecoder({ strict: this.strict });
@@ -399,6 +399,14 @@ export class Protocol {
     // Spec §6.7: the transmitter samples the *second* ACK bit.
     if (this.ackIndex >= ACK_BITS) {
       this.ackSeen = level;
+      if (this.ackPending && level !== DOMINANT) {
+        // Spec §6.7: this node sent dominant for the whole field and still
+        // reads recessive, so its own speaker is not reaching its own
+        // microphone. The transmitter hears no acknowledgement either, unless
+        // another node sent one.
+        this.stats.acksUnheard++;
+        this.emit('ack-unheard', { frame: this.decoder.frame });
+      }
       this.ackPending = false;
       this.state = STATE.ACK_DELIM;
     }

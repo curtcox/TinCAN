@@ -237,6 +237,10 @@ $('#mute').addEventListener('click', () => {
   if (!modem) return;
   const next = !modem.muted;
   modem.setMuted(next);
+  // A muted node decodes but neither acknowledges nor sends error flags, which
+  // from its report alone looks like a speaker that has stopped (§6.7).
+  events.push({ t: +(performance.now() / 1000).toFixed(3), event: next ? 'muted' : 'unmuted' });
+  if (events.length > EVENT_HISTORY) events.shift();
   $('#mute').textContent = next ? 'Unmute transmit' : 'Mute transmit';
   log.add(next
     ? 'transmit muted — this node is now a listener and will not acknowledge'
@@ -371,6 +375,10 @@ function wire(m) {
       : `${d.kind} error: ${d.detail || ''}`;
     log.add(escapeHtml(msg), 'err');
   });
+
+  m.on('ack-unheard', () => log.add('this node acknowledged a frame but did not hear its own acknowledgement: '
+    + 'its sound is not reaching its microphone (the tab or the computer is muted, or the browser has stopped '
+    + 'its audio output), so the sender hears no acknowledgement from it either', 'warnrow'));
 
   m.on('error-state', (e) => {
     log.add(`error state ${e.detail.from} → <b>${e.detail.to}</b>`, 'warnrow');

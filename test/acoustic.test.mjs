@@ -214,6 +214,49 @@ test('a receiver whose clock trails the next frame hard-synchronizes on SYNC tha
   }
 });
 
+test('a node whose speaker stops still decodes, cannot acknowledge, and says so (§6.7)', () => {
+  // Two Console tabs on one laptop at T4: ada decoded five attempts at a
+  // segment of bob's band-test report, each with a valid CRC, and bob found
+  // no acknowledgement each time. Neither node's events show a late
+  // acknowledgement. ada's form error came 1.000 s after its CRC delimiter,
+  // where hearing its own acknowledgement resynchronizes it by SJW and makes
+  // that 1.020 s, and bob retried 4.29 s after its error, where waiting out
+  // ada's error flag takes about 4.55 s: ada made no sound at all. The sixth
+  // attempt was acknowledged.
+  const ch = channel({
+    profile: 'T4', deviceLatencyMs: 70, selfDelayMs: 0.5,
+    nodes: [{ name: 'ada', device: 'laptop' }, { name: 'bob', device: 'laptop' }],
+  });
+  const [ada, bob] = ch.protocols;
+  const speaker = ch.node('ada').phy;
+  const amplitude = speaker.amplitude;
+  const at = (p, event) => { const out = []; p.on(event, (d) => out.push({ t: ch.n / ch.sampleRate, ...d })); return out; };
+  const decoded = at(ada, 'frame-decoded');
+  const adaErrors = at(ada, 'error-frame');
+  const unheard = at(ada, 'ack-unheard');
+  const got = at(ada, 'frame');
+  const bobErrors = at(bob, 'error-frame');
+  const starts = at(bob, 'tx-start');
+
+  ch.run(1);
+  speaker.amplitude = 0;
+  bob.send({ id: 0x081fe190, extended: true, data: [0x21, 0xfe, 0xd0, 0xe7, 0xf5, 0xf6, 0xba, 0xbf] });
+  assert.ok(ch.runUntil(() => starts.length === 2, 50), 'bob tried again');
+  assert.deepEqual(bobErrors.map((e) => e.detail), ['no node acknowledged']);
+  assert.equal(decoded.length, 1, 'ada decoded it, CRC valid');
+  assert.deepEqual(adaErrors.map((e) => e.detail), ['dominant bit in EOF'], 'bob\'s error flag');
+  const bit = ch.bitTime;
+  assert.ok(Math.abs(adaErrors[0].t - decoded[0].t - 4 * bit) < 0.005, 'ada\'s clock never moved to its own acknowledgement');
+  assert.ok(starts[1].t - bobErrors[0].t < 17.5 * bit, 'bob had no error flag of ada\'s to wait out');
+  assert.equal(unheard.length, 1, 'ada knows its acknowledgement did not reach its own microphone');
+
+  speaker.amplitude = amplitude;
+  assert.ok(ch.runUntil(() => got.length === 1, 45), 'the next attempt is acknowledged');
+  assert.deepEqual([...got[0].frame.data], [0x21, 0xfe, 0xd0, 0xe7, 0xf5, 0xf6, 0xba, 0xbf]);
+  assert.equal(bob.stats.framesSent, 1);
+  assert.equal(ada.stats.acksUnheard, 1, 'an acknowledgement it heard is not reported');
+});
+
 test('a lone node transmits, is not acknowledged, and says so', () => {
   const ch = channel({ nodes: [{ name: 'solo', x: 0, y: 0 }] });
   const [solo] = ch.protocols;
