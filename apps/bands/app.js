@@ -20,7 +20,10 @@ const KEYS = Object.keys(BANDS);
 const tones = (b) => [BANDS[b].fR, BANDS[b].fD];
 const hz = (f) => (f >= 1000 ? `${(f / 1000).toFixed(f % 1000 ? 2 : 0)} kHz` : `${f} Hz`);
 const fmt = (v, d = 1) => (v === null || v === undefined || !Number.isFinite(v) ? '—' : v.toFixed(d));
-const signed = (v, d = 1) => (v > 0 ? `+${v.toFixed(d)}` : v.toFixed(d));
+const signed = (v, d = 1) => {
+  const s = v.toFixed(d);
+  return Number(s) > 0 ? `+${s}` : Number(s) === 0 ? (0).toFixed(d) : s;   // never "-0"
+};
 
 /** Who hears a band, in words. Above ISO 226, from Wang et al. (2021). */
 const HEARD_BY = {
@@ -292,7 +295,7 @@ $('#measure').addEventListener('click', async () => {
         verdict = `<b>${verdict}, but cannot arbitrate</b>`;
       } else if (worst >= 6 && bal.level === 'tight') {
         balance = `<b>${balance}</b>`;
-        verdict = `<b>${verdict}, but contenders must be at nearly equal distances</b>`;
+        verdict = `<b>${verdict}, but contenders must be within ${fmt(bal.ratio)}:1 of each other's distance</b>`;
       }
       return [
         `<b>${escapeHtml(BANDS[b].name)}</b>`,
