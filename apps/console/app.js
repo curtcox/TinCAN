@@ -17,6 +17,7 @@ import {
   LogView, topbar, escapeHtml, drawBits, drawMeter, fillMicrophones, micName, measuredLatency, fitProfiles,
 } from '../ui.js';
 import { LinkEnd } from '../sidelink.js';
+import { BandTestPanel } from '../bandtest.js';
 
 $('#chrome').replaceWith(topbar('Console'));
 
@@ -143,6 +144,7 @@ $('#detreset').addEventListener('click', resetThresholds);
 resetThresholds();
 
 const log = new LogView($('#log'), { limit: 500 });
+const bandTest = new BandTestPanel($('#bandtest'), { log: (html, kind) => log.add(html, kind) });
 const chat = new LogView($('#chat'), { limit: 200 });
 
 const txButtons = ['#sendtext', '#sendraw', '#burst', '#clearq', '#announce', '#mute'];
@@ -202,6 +204,7 @@ $('#start').addEventListener('click', async () => {
     session.on('transport-error', ({ source, error }) =>
       log.add(`transport error from ${source}: ${escapeHtml(error)}`, 'err'));
     wireLinks(session);
+    bandTest.attach({ modem, session, profile: profSel.value });
 
     setLive(true);
     setState('on the bus', 'live');
@@ -222,6 +225,7 @@ $('#stop').addEventListener('click', async () => {
     await stopLink();
     await waitForQueue(modem, 3 * 123 * timing(profSel.value).bitTime * 1000);
   }
+  bandTest.detach();
   if (modem) await modem.stop();
   modem = null; session = null;
   setLive(false);
@@ -727,6 +731,7 @@ function setLinkControls() {
   $('#linktext').disabled = !link?.up;
   $('#linksend').disabled = !link?.up;
   for (const s of ['#linkpeer', '#linkband', '#linkprofile']) $(s).disabled = open;
+  bandTest.show();                 // a test may not be requested while a link is open
 }
 setLinkControls();
 

@@ -7,8 +7,10 @@
 import {
   BANDS, PROFILES, timing, maxRange, bandsCompatible, profileFitsBand, nearFarMarginDb, bandFitsRate, sampleRateFor,
 } from '../../src/tincan/params.js';
-import { CONTEXT_OPTIONS, audioConstraints } from '../../src/tincan/modem.js';
-import { $, el, topbar, escapeHtml } from '../ui.js';
+import { CONTEXT_OPTIONS, audioConstraints, Modem } from '../../src/tincan/modem.js';
+import { Session } from '../../src/tincan/transport.js';
+import { $, el, topbar, escapeHtml, fitProfiles, LogView, measuredLatency } from '../ui.js';
+import { BandTestPanel } from '../bandtest.js';
 import { toneAmplitude, AMPLITUDE } from '../selftest/probe.js';
 import {
   sweepPlan, sweepSignal, analyseSweep, CARRIES_DB, USABLE_DB, FLAT_DB, USABLE_FLAT_DB,
@@ -440,3 +442,96 @@ $('#sweep').addEventListener('click', async () => {
     $('#measure').disabled = false;
   }
 });
+
+/* ------------------------------------------------------------------ */
+/* testing the bands with other devices — Part 2 §9                    */
+/* ------------------------------------------------------------------ */
+
+// Made here rather than in the page, so a cached page still gets them.
+function panelAfterSweep(id) {
+  let node = $(`#${id}`);
+  if (!node) {
+    node = el('div', { class: 'panel', id });
+    const after = $('#bandtest') || $('#busjoin') || $('#sweep').closest('.panel');
+    after.after(node);
+  }
+  return node;
+}
+
+const join = {
+  root: panelAfterSweep('busjoin'),
+  callsign: el('input', { type: 'text', maxlength: 6, placeholder: 'up to 6 characters' }),
+  address: el('input', { type: 'number', min: 1, max: 30, value: 1 + Math.floor(Math.random() * 30) }),
+  band: el('select', {}, KEYS.map((b) => el('option', { value: b }, `${BANDS[b].name} — ${BANDS[b].fR}/${BANDS[b].fD} Hz`))),
+  profile: el('select', {}, Object.keys(PROFILES).map((p) => el('option', { value: p }, p))),
+  start: el('button', { class: 'primary' }, 'Join the bus'),
+  stop: el('button', { disabled: true }, 'Leave'),
+  state: el('span', { class: 'pill' }, 'offline'),
+  log: el('div', { class: 'log', style: 'max-height:10rem;margin-top:.6rem' }),
+  modem: null,
+  session: null,
+};
+join.profile.value = 'T25';
+join.band.addEventListener('change', () => fitProfiles(join.profile, join.band.value));
+join.root.replaceChildren(
+  el('div', { class: 'row', style: 'margin-bottom:.6rem' },
+    el('h2', { style: 'margin:0' }, 'Test them with other devices'), el('span', { class: 'spacer' }), join.state),
+  el('p', {
+    class: 'note', style: 'margin-top:0',
+    html: 'The measurements above are of this device hearing itself. To learn which bands carry between this device '
+      + 'and others, join the bus they are on — the same band and bit timing as their '
+      + '<a href="../console/">Consoles</a> — then request a band test, or take part in one they request.',
+  }),
+  el('label', { class: 'field' }, el('span', {}, 'Callsign'), join.callsign),
+  el('label', { class: 'field' }, el('span', {}, 'Address'), join.address),
+  el('label', { class: 'field' }, el('span', {}, 'Band'), join.band),
+  el('label', { class: 'field' }, el('span', {}, 'Bit timing'), join.profile),
+  el('div', { class: 'row' }, join.start, join.stop),
+  join.log,
+);
+const joinLog = new LogView(join.log, { limit: 200 });
+const bandTest = new BandTestPanel(panelAfterSweep('bandtest'), { log: (html, kind) => joinLog.add(html, kind) });
+
+function setJoined(live, text, cls = '') {
+  join.start.disabled = live;
+  join.stop.disabled = !live;
+  for (const c of [join.callsign, join.address, join.band, join.profile]) c.disabled = live;
+  join.state.textContent = text;
+  join.state.className = `pill ${cls}`;
+}
+
+join.start.addEventListener('click', async () => {
+  join.start.disabled = true;
+  try {
+    const m = new Modem({ band: join.band.value, profile: join.profile.value, name: join.callsign.value || 'bands' });
+    join.modem = m;
+    await m.start();
+    const label = m.diagnostics().input?.label;
+    const lat = label && measuredLatency(label);
+    if (lat) m.measuredLatencyMs = lat.ms;
+    const s = new Session({ on: (ev, fn) => m.on(ev, (e) => fn(e.detail)), send: (f) => m.send(f) },
+      { address: Number(join.address.value) || 1, callsign: join.callsign.value });
+    join.session = s;
+    s.on('presence', ({ address, announce }) => {
+      if (!announce.leaving) joinLog.add(`heard ${escapeHtml(announce.callsign || `node ${address}`)} (node ${address})`);
+    });
+    m.on('error-frame', (e) => joinLog.add(`${escapeHtml(e.detail.kind)} error on the bus`, 'err'));
+    bandTest.attach({ modem: m, session: s, profile: join.profile.value });
+    s.announce();
+    setJoined(true, `on band ${join.band.value} at ${join.profile.value}`, 'live');
+    joinLog.add(`joined as node ${s.address}`);
+  } catch (err) {
+    joinLog.add(`could not join: ${escapeHtml(err.message || err)}`, 'err');
+    if (join.modem) await join.modem.stop().catch(() => {});
+    join.modem = join.session = null;
+    setJoined(false, 'failed', 'bad');
+  }
+});
+
+join.stop.addEventListener('click', async () => {
+  bandTest.detach();
+  if (join.modem) await join.modem.stop();
+  join.modem = join.session = null;
+  setJoined(false, 'offline');
+});
+

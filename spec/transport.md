@@ -208,6 +208,11 @@ Sequence numbers start at 1 for the first `CONSECUTIVE` frame and wrap 15 → 0.
 A receiver that observes a gap MUST abandon the transfer and MAY send a `FLOW`
 with status `ABORT`.
 
+A `CONTROL` message too long for one frame (§9.1) is sent as a broadcast
+transfer of the same PCI-prefixed frames in extended identifiers with `TYPE` =
+`CONTROL`, `DESTINATION = 0xFF` and `SEG` set; the reassembled contents are the
+message, opcode first. It is not text, and `TRANSPORT` frames stay text only (§5.1).
+
 For broadcast transfers (`DESTINATION = 0xFF`, or any base-identifier transfer)
 the `FLOW` exchange is omitted and the sender proceeds directly from `FIRST` to
 `CONSECUTIVE` frames, separated by at least `ST_min`.
@@ -269,7 +274,8 @@ Capability flags:
 | 5 | Supports text profile (§5.1) |
 | 4 | Listener only — will never transmit again after this frame |
 | 3 | Supports side links (§8) |
-| 2–0 | reserved |
+| 2 | Takes part in band tests (§9) |
+| 1–0 | reserved |
 
 A node SHOULD transmit `ANNOUNCE` on joining and MAY repeat it at an interval of
 not less than 60 s. Given the audibility of band A, implementations SHOULD
@@ -377,6 +383,7 @@ address. The first payload octet of a `CONTROL` frame is an opcode:
 | `0x21` | `LINK_ACCEPT` | proposer, link, t_slop |
 | `0x22` | `LINK_DECLINE` | proposer, link, reason |
 | `0x23` | `LINK_CLOSE` | peer, link, reason |
+| `0x24`–`0x27` | band tests | §9 |
 
 | Field | Size | Meaning |
 |---|---|---|
@@ -458,3 +465,113 @@ there too, so a link that fails — out of range on its band, or a band one
 device's speaker cannot reproduce — is noticed and ended on a bus that still
 works. Nothing about a side link changes the main bus: its frames, timing and
 arbitration are the same whether or not any links are open.
+
+---
+
+## 9. Band tests
+
+Which bands work, and between which nodes, depends on each device's speaker
+and microphone and on where the devices are. A node that has measured its own
+(Part 1 §4.2) still does not know whether another node hears it on band F, or
+how unevenly. A **band test** answers that for every node at once: each node
+that joins plays each band's two tones in its own time slot, every node
+listening measures what arrives, and the nodes that played then report what
+they heard on the main bus. At the end, every node that listened throughout
+has, for each band, how loudly and how evenly each player was heard by each
+player, and by itself.
+
+### 9.1 Messages
+
+| Opcode | Name | Payload after the opcode |
+|---|---|---|
+| `0x24` | `TEST_REQUEST` | test, bands, window |
+| `0x25` | `TEST_JOIN` | requester, test, bands |
+| `0x26` | `TEST_START` | test, bands, players (1–5 addresses) |
+| `0x27` | `TEST_REPORT` | requester, test, noise, levels (§9.4) |
+
+| Field | Size | Meaning |
+|---|---|---|
+| test | 1 | Chosen by the requester; with its address it names the test |
+| bands | 1 | Bit *n*−1 set for the band with Part 1 §4.2 ID *n*: in a request and start, the bands tested; in a join, those of them the joining node can play and hear |
+| window | 1 | Seconds the requester waits for joins, 1–255 |
+| requester | 1 | The node that requested the test |
+| players | 1 each | The nodes that play, in slot order, the requester first |
+
+`TEST_REQUEST`, `TEST_JOIN` and `TEST_START` are `CONTROL` frames like those of
+§8.1. `TEST_REPORT` does not fit one frame and is sent segmented (§3.2).
+
+### 9.2 Requesting and joining
+
+The requester chooses the bands: those it can run (Part 1 §4.2), less the
+bands of any side links it knows to be open, which the test would disturb. It
+SHOULD NOT request a test while it has a side link open itself.
+
+A node that hears `TEST_REQUEST` and wants to play joins with `TEST_JOIN`
+before the window ends, giving the bands of the request it can run. A node
+that only listens — a listener-only device, or one that chooses not to play —
+does not join, and still measures (§9.3).
+
+When the window has passed since its request was delivered, the requester
+sends `TEST_START` naming itself and up to four of the nodes that joined, in
+the order their joins arrived. A join heard after `TEST_START` is ignored.
+
+### 9.3 The test
+
+Every node that hears `TEST_START`, or sends it, takes the end of that frame's
+last bit as it heard it as time 0, and from then until the test's end MUST NOT
+start a frame on the main bus. The test's own tones fall on the main band too,
+so a node SHOULD also stop its main-bus receiver for that time, so that it
+neither decodes them nor signals errors over them; the bus is idle when it
+stops and when it resumes.
+
+The test is laid out from time 0 in seconds. With *P* players and *B* bands:
+
+| From | To | What |
+|---|---|---|
+| 0 | 1.0 | Nothing: nodes stop their main-bus receivers and prepare |
+| 1.0 | 2.2 | Quiet: every node measures its noise at each tested tone |
+| 2.2 + 1.5 *k* | 3.7 + 1.5 *k* | Slot *k* = *p* · *B* + *b*: player *p* plays band *b* (lowest ID first) |
+| 2.2 + 1.5 *P B* | + 0.5 | Late sound dies away; the test ends |
+
+In its slot a player plays the band's recessive tone from 0.1 s to 0.7 s and
+its dominant tone from 0.8 s to 1.4 s, each at the level it transmits frames
+at, with 10 ms raised-cosine onsets and ends. It SHOULD start each tone early
+by its own speaker-to-microphone latency, so that the tones arrive when every
+node expects them. A player stays silent in the slots of bands it cannot play.
+
+Every node, player or not, measures the level of each tone over the middle
+0.3 s of the time it is played (0.25–0.55 s and 0.95–1.25 s into the slot),
+which leaves 150 ms either way for the nodes' differing latencies; and its
+noise at each tone over three such 0.3 s windows in the quiet, starting at
+1.15 s, as the root-mean-square of the three. Levels are the amplitude of the
+tone at the microphone relative to full scale, measured with a Hann window.
+
+At 4 players and 7 bands the test takes 44.7 s. A band test is loud: every
+band but B and F is audible, at the level of a frame.
+
+### 9.4 Reporting
+
+When the test ends, each player sends `TEST_REPORT`:
+
+| Octets | What |
+|---|---|
+| 1 | requester |
+| 1 | test |
+| 2 *B* | its noise at each band's recessive and dominant tone |
+| 2 *B* (*P* − 1) | the level of each of those tones from each other player, in slot order |
+
+Each level is one octet: −2 × its level in dBFS, rounded and limited to 0–254
+(0.5 dB steps down to −127 dBFS); `255` where this node did not measure it —
+a band it cannot hear. A player that did not play a band shows as that band's
+noise. The level of a player's tones at its own microphone is not reported.
+
+Reports from 4 players on 7 bands are 59 octets each: nine frames, or about a
+minute at `T25` apiece, during which the main bus is otherwise free.
+
+From the reports and its own measurements, every node that listened has, for
+each band, each player's two tones as heard by every player and by itself.
+The weaker tone's height above the listener's noise says whether the band
+carries between that pair at all; the dominant tone's level less the
+recessive's is the tone tilt of Part 1 §4.6, which the pair's arbitration
+margin must absorb. A listener-only node's own measurements stay with it.
+

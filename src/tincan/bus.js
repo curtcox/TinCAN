@@ -11,7 +11,7 @@
  */
 
 import { Phy } from './phy.js';
-import { Protocol, DOMINANT, RECESSIVE } from './protocol.js';
+import { Protocol, DOMINANT, RECESSIVE, STATE } from './protocol.js';
 import { SPEED_OF_SOUND, PROFILES, timing } from './params.js';
 
 /* ------------------------------------------------------------------ */
@@ -131,7 +131,11 @@ export class AcousticChannel {
         amplitude: (spec.gain ?? 1) * 0.3,
         onBit: spec.onBit,
       });
-      return { spec, protocol, phy, x: spec.x ?? 0, y: spec.y ?? 0, history: null, head: 0 };
+      // tap(x, t) sees the node's input, play(t) adds to its output, and
+      // holdUntil (a sample index) stops its receiver: hooks for band tests.
+      return {
+        spec, protocol, phy, x: spec.x ?? 0, y: spec.y ?? 0, history: null, head: 0, tap: null, play: null, holdUntil: 0,
+      };
     });
 
     // Path delays and gains. Distance attenuation is 1/r with a 0.25 m floor so
@@ -237,8 +241,13 @@ export class AcousticChannel {
         x += this.gain[i][j] * h[(t - this.delay[i][j]) & this.histMask];
       }
       if (this.noise > 0) x += this.noise * (this.random() * 2 - 1);
-      const y = this.nodes[i].phy.processSample(x);
-      this.nodes[i].history[t & this.histMask] = y;
+      const node = this.nodes[i];
+      if (node.tap) node.tap(x, t);
+      // A held node's receiver stops, as a band test asks (Part 2 §9.3), once
+      // its bus is idle.
+      const held = t < node.holdUntil && node.protocol.state === STATE.BUS_IDLE && !node.protocol.transmitting;
+      const y = held ? 0 : node.phy.processSample(x);
+      node.history[t & this.histMask] = y + (node.play ? node.play(t) : 0);
     }
     this.n++;
   }

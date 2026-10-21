@@ -100,6 +100,7 @@ function room(nodes, { delayMs = 3, noise = 0.0005, gain = null, shape = null } 
         input = [x];
       }
       const out = new Float32Array(BLOCK);
+      globalThis.currentTime = n.k / FS;
       n.proc.process([input], [[out]]);
       for (let j = 0; j < BLOCK; j++) n.history[(n.k + j) & mask] = out[j];
       n.k += BLOCK;
@@ -130,6 +131,37 @@ test('two Consoles announce and exchange text through the real worklet and Modem
     assert.equal(n.modem.status.queue, 0, 'nothing left queued');
     assert.equal(n.modem.status.errorState, 'error-active');
   }
+});
+
+test('a held receiver neither decodes nor answers a band test\'s tones on its band (Part 2 §9.3)', async () => {
+  const { testPlan, testSignal } = await import('../src/tincan/bandtest.js');
+  const ada = consoleNode({ name: 'ada', address: 3 });
+  const bob = consoleNode({ name: 'bob', address: 12 });
+  // Band A's tones, loud, from 2 s: what another player's slot sounds like.
+  const tones = testSignal(FS, testPlan(['A'], [1]), 1, { amplitude: 0.5 });
+  const from = 2 - 2.2 - 0.1;
+  const shape = (i, v, t) => {
+    const k = Math.round((t - from) * FS);
+    return v + (k >= 0 && k < tones.length ? tones[k] : 0);
+  };
+  const errors = [];
+  const times = [];
+  for (const n of [ada, bob]) {
+    n.modem.on('error-frame', (e) => errors.push(e.detail));
+    n.modem.on('overload', (e) => errors.push(e.detail));
+  }
+  bob.modem.on('frame', (e) => times.push(e.detail.at));
+  const run = room([ada, bob], { shape });
+
+  run(0.5);
+  ada.modem.hold(5);
+  bob.modem.hold(5);
+  run(5);
+  assert.deepEqual(errors, [], 'nothing decoded, no error flags');
+  ada.session.sendText('after');
+  run(8);
+  assert.deepEqual(bob.heard, ['after'], 'and the bus works afterwards');
+  assert.ok(times.length === 1 && times[0] > 5 && times[0] < 13.5, `the frame's time is on the audio clock: ${times[0]}`);
 });
 
 test('the worklet reports a rejected frame instead of throwing on the audio thread', () => {

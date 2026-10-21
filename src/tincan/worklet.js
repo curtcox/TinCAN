@@ -12,7 +12,7 @@
  * events. It never sees a bit.
  */
 
-import { Protocol } from './protocol.js';
+import { Protocol, STATE } from './protocol.js';
 import { Phy } from './phy.js';
 
 const FORWARDED_EVENTS = [
@@ -51,9 +51,15 @@ class TinCanProcessor extends AudioWorkletProcessor {
       onBit: (d) => this._onBit(d),
     });
 
+    // Every event carries `at`: the audio time of the input sample that
+    // caused it, which a band test takes as its time 0 (Part 2 §9.3).
+    this.at = 0;
     for (const name of FORWARDED_EVENTS) {
-      this.protocol.on(name, (detail) => this._post({ type: 'event', event: name, detail: serialize(detail) }));
+      this.protocol.on(name, (detail) => this._post({ type: 'event', event: name, detail: { ...serialize(detail), at: this.at } }));
     }
+    // Until this audio time the receiver stops, once the bus is idle: a band
+    // test's tones fall on this node's band too (Part 2 §9.3).
+    this.holdUntil = 0;
 
     // Input gaps: runs of exact zeros, which no microphone produces but the
     // browser inserts when the capture side falls behind (and which its track
@@ -107,6 +113,9 @@ class TinCanProcessor extends AudioWorkletProcessor {
       case 'threshold':
         if (msg.thetaD !== undefined) this.phy.thetaD = msg.thetaD;
         if (msg.kappa !== undefined) this.phy.kappa = msg.kappa;
+        break;
+      case 'hold':
+        this.holdUntil = msg.until;
         break;
       case 'clear-queue':
         this.protocol.txQueue.length = 0;
@@ -188,7 +197,9 @@ class TinCanProcessor extends AudioWorkletProcessor {
     for (let i = 0; i < n; i++) {
       const x = input ? input[i] : 0;
       if (input) this._watchInput(x, i);
-      const y = this.phy.processSample(x);
+      this.at = currentTime + i / sampleRate;
+      const held = this.at < this.holdUntil && this.protocol.state === STATE.BUS_IDLE && !this.protocol.transmitting;
+      const y = held ? 0 : this.phy.processSample(x);
       if (output) output[i] = (this.muted ? 0 : y) + this.dither * this._noise();
     }
 

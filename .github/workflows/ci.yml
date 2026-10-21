@@ -50,7 +50,8 @@ jobs:
                    _site/apps/simulator/index.html _site/apps/selftest/index.html \
                    _site/apps/bands/index.html _site/apps/bands/acoustics.js _site/apps/bands/sweep.js \
                    _site/apps/pair/index.html _site/apps/sidelink.js \
-                   _site/src/tincan/worklet.js _site/src/tincan/modem.js; do
+                   _site/src/tincan/worklet.js _site/src/tincan/modem.js \
+                   _site/src/tincan/bandtest.js _site/src/tincan/tones-worklet.js _site/apps/bandtest.js; do
             test -s "$f" || (echo "missing or empty: $f" && exit 1)
           done
           # Every page and report names the commit it was built from.

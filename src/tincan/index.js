@@ -15,5 +15,6 @@ export * from './protocol.js';
 export { Phy } from './phy.js';
 export * from './bus.js';
 export * from './transport.js';
+export * from './bandtest.js';
 
 export const VERSION = '1.0.0-draft';

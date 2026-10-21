@@ -9,6 +9,7 @@
 import { BANDS, PROFILES, timing, maxRange, bandFitsRate, sampleRateFor } from './params.js';
 
 const WORKLET_URL = new URL('./worklet.js', import.meta.url);
+const TONES_URL = new URL('./tones-worklet.js', import.meta.url);
 
 /**
  * Capture constraints. Every one of these matters — see rationale §9.
@@ -297,6 +298,7 @@ export class Modem extends EventTarget {
     if (this.watchdog) { clearInterval(this.watchdog); this.watchdog = null; }
     if (this.node) { this.node.port.postMessage({ type: 'stop' }); this.node.disconnect(); }
     if (this.source) this.source.disconnect();
+    if (this.tonesNode) { this.tonesNode.then((n) => n.disconnect()).catch(() => {}); this.tonesNode = null; }
     if (this.stream) for (const t of this.stream.getTracks()) t.stop();
     if (this.ctx) await this.ctx.close();
     this.ready = false;
@@ -334,6 +336,54 @@ export class Modem extends EventTarget {
 
   setThresholds({ thetaD, kappa }) {
     if (this.node) this.node.port.postMessage({ type: 'threshold', thetaD, kappa });
+  }
+
+  /**
+   * Stop the receiver until audio time `until`, from when the bus is next
+   * idle, so that a band test's tones are neither decoded nor answered with
+   * error flags (Part 2 §9.3).
+   */
+  hold(until) {
+    if (this.node) this.node.port.postMessage({ type: 'hold', until });
+  }
+
+  /** Play `signal` through this node's speaker, its sample 0 at audio time `at`. */
+  async playAt(signal, at) {
+    (await this._tones()).port.postMessage({ type: 'play', at, signal });
+  }
+
+  /**
+   * Record `samples` of this node's input from audio time `at`; input before
+   * the request is zeros. Resolves with the recording.
+   */
+  async recordAt(at, samples) {
+    const tones = await this._tones();
+    const id = (this._recordings = (this._recordings || 0) + 1);
+    return new Promise((resolve) => {
+      const h = (e) => {
+        if (e.data.type !== 'recorded' || e.data.id !== id) return;
+        tones.port.removeEventListener('message', h);
+        resolve(e.data.samples);
+      };
+      tones.port.addEventListener('message', h);
+      tones.port.start();
+      tones.port.postMessage({ type: 'record', id, at, samples });
+    });
+  }
+
+  /** A second processor beside the node's, sharing its microphone and speaker. */
+  _tones() {
+    if (!this.tonesNode) {
+      this.tonesNode = this.ctx.audioWorklet.addModule(TONES_URL).then(() => {
+        const n = new AudioWorkletNode(this.ctx, 'tincan-tones', {
+          numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+        });
+        this.source.connect(n);
+        n.connect(this.ctx.destination);
+        return n;
+      });
+    }
+    return this.tonesNode;
   }
 
   clearQueue() {

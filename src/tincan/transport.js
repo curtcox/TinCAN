@@ -211,12 +211,12 @@ export function describePci(payload) {
 /* ------------------------------------------------------------------ */
 
 export const CAP = {
-  FULL_NODE: 0x80, SEGMENTED: 0x40, TEXT: 0x20, LISTENER_ONLY: 0x10, SIDE_LINKS: 0x08,
+  FULL_NODE: 0x80, SEGMENTED: 0x40, TEXT: 0x20, LISTENER_ONLY: 0x10, SIDE_LINKS: 0x08, BAND_TESTS: 0x04,
 };
 
 export const PROTOCOL_VERSION = 0x10;
 
-export function buildAnnounce(callsign, caps = CAP.SEGMENTED | CAP.TEXT | CAP.SIDE_LINKS) {
+export function buildAnnounce(callsign, caps = CAP.SEGMENTED | CAP.TEXT | CAP.SIDE_LINKS | CAP.BAND_TESTS) {
   const name = new TextEncoder().encode(callsign || '');
   const out = new Uint8Array(2 + Math.min(6, name.length));
   out[0] = PROTOCOL_VERSION;
@@ -236,6 +236,7 @@ export function parseAnnounce(data) {
     text: !!(data[1] & CAP.TEXT),
     leaving: !!(data[1] & CAP.LISTENER_ONLY),
     sideLinks: !!(data[1] & CAP.SIDE_LINKS),
+    bandTests: !!(data[1] & CAP.BAND_TESTS),
   };
 }
 
@@ -246,6 +247,7 @@ export function parseAnnounce(data) {
 /** First octet of a CONTROL frame. */
 export const CONTROL = {
   ACK: 0x06, NAK: 0x15, LINK_PROPOSE: 0x20, LINK_ACCEPT: 0x21, LINK_DECLINE: 0x22, LINK_CLOSE: 0x23,
+  TEST_REQUEST: 0x24, TEST_JOIN: 0x25, TEST_START: 0x26, TEST_REPORT: 0x27,
 };
 export const DECLINE = { BAND: 1, TIMING: 2, BUSY: 3, REFUSED: 4 };
 export const CLOSE = { FINISHED: 0, NO_CONTACT: 1, ERRORS: 2 };
@@ -282,11 +284,46 @@ export function buildLinkMessage(m) {
   }
 }
 
+/** Part 2 §9.1: bit n-1 for the band with ID n. */
+export function bandMask(bands) {
+  return bands.reduce((m, b) => m | (1 << (BANDS[b].id - 1)), 0);
+}
+
+/** The bands of a mask, lowest ID first. */
+export function bandsOfMask(mask) {
+  return Object.keys(BANDS).filter((b) => mask & (1 << (BANDS[b].id - 1)))
+    .sort((a, b) => BANDS[a].id - BANDS[b].id);
+}
+
+/**
+ * The payload of a band-test CONTROL message — Part 2 §9.1.
+ * @param {{op:number, test:number, requester?:number, bands?:string[],
+ *   window?:number, players?:number[], levels?:Uint8Array|number[]}} m
+ */
+export function buildTestMessage(m) {
+  switch (m.op) {
+    case CONTROL.TEST_REQUEST:
+      return Uint8Array.of(m.op, m.test & 0xff, bandMask(m.bands), Math.max(1, Math.min(255, Math.round(m.window))));
+    case CONTROL.TEST_JOIN:
+      return Uint8Array.of(m.op, m.requester & 31, m.test & 0xff, bandMask(m.bands));
+    case CONTROL.TEST_START:
+      if (!m.players.length || m.players.length > 5) throw new Error('a band test has 1 to 5 players');
+      return Uint8Array.of(m.op, m.test & 0xff, bandMask(m.bands), ...m.players.map((a) => a & 31));
+    case CONTROL.TEST_REPORT:
+      return Uint8Array.of(m.op, m.requester & 31, m.test & 0xff, ...m.levels);
+    default:
+      throw new Error(`not a band-test opcode: ${m.op}`);
+  }
+}
+
 /** Parse a CONTROL frame's payload, or null if it is not one this knows. */
 export function parseControl(data) {
   if (!data || !data.length) return null;
   const op = data[0];
-  const need = { [CONTROL.LINK_PROPOSE]: 6, [CONTROL.LINK_ACCEPT]: 4, [CONTROL.LINK_DECLINE]: 4, [CONTROL.LINK_CLOSE]: 4 };
+  const need = {
+    [CONTROL.LINK_PROPOSE]: 6, [CONTROL.LINK_ACCEPT]: 4, [CONTROL.LINK_DECLINE]: 4, [CONTROL.LINK_CLOSE]: 4,
+    [CONTROL.TEST_REQUEST]: 4, [CONTROL.TEST_JOIN]: 4, [CONTROL.TEST_START]: 4, [CONTROL.TEST_REPORT]: 3,
+  };
   if (op === CONTROL.ACK || op === CONTROL.NAK) return { op, name: op === CONTROL.ACK ? 'ACK' : 'NAK' };
   if (!need[op] || data.length < need[op]) return null;
   switch (op) {
@@ -299,6 +336,14 @@ export function parseControl(data) {
       return { op, name: 'LINK_ACCEPT', proposer: data[1], link: data[2], slopMs: slopMs(data[3]) };
     case CONTROL.LINK_DECLINE:
       return { op, name: 'LINK_DECLINE', proposer: data[1], link: data[2], reason: data[3] };
+    case CONTROL.TEST_REQUEST:
+      return { op, name: 'TEST_REQUEST', test: data[1], bands: bandsOfMask(data[2]), window: data[3] };
+    case CONTROL.TEST_JOIN:
+      return { op, name: 'TEST_JOIN', requester: data[1], test: data[2], bands: bandsOfMask(data[3]) };
+    case CONTROL.TEST_START:
+      return { op, name: 'TEST_START', test: data[1], bands: bandsOfMask(data[2]), players: [...data.subarray(3, 8)] };
+    case CONTROL.TEST_REPORT:
+      return { op, name: 'TEST_REPORT', requester: data[1], test: data[2], levels: data.slice(3) };
     default:
       return { op, name: 'LINK_CLOSE', peer: data[1], link: data[2], reason: data[3] };
   }
@@ -316,6 +361,10 @@ export function describeControl(data) {
     case CONTROL.LINK_ACCEPT: return `LINK_ACCEPT ${c.proposer}#${c.link}, ${slop(c.slopMs)}`;
     case CONTROL.LINK_DECLINE: return `LINK_DECLINE ${c.proposer}#${c.link}: ${DECLINE_TEXT[c.reason] ?? c.reason}`;
     case CONTROL.LINK_CLOSE: return `LINK_CLOSE #${c.link} with ${c.peer}: ${CLOSE_TEXT[c.reason] ?? c.reason}`;
+    case CONTROL.TEST_REQUEST: return `TEST_REQUEST #${c.test}: bands ${c.bands.join('') || 'none'}, ${c.window} s to join`;
+    case CONTROL.TEST_JOIN: return `TEST_JOIN ${c.requester}#${c.test}: plays ${c.bands.join('') || 'nothing'}`;
+    case CONTROL.TEST_START: return `TEST_START #${c.test}: bands ${c.bands.join('')}, players ${c.players.join(', ')}`;
+    case CONTROL.TEST_REPORT: return `TEST_REPORT ${c.requester}#${c.test}: ${c.levels.length} levels`;
     default: return c.name;
   }
 }
@@ -381,7 +430,7 @@ export class Session {
     this.links = new Map();
     this.nextLink = 1 + Math.floor(Math.random() * 254);
 
-    protocol.on('frame', ({ frame }) => this._onFrame(frame));
+    protocol.on('frame', ({ frame, at }) => this._onFrame(frame, at));
   }
 
   on(event, fn) {
@@ -490,6 +539,18 @@ export class Session {
     }
   }
 
+  /* band tests — Part 2 §9 ---------------------------------------- */
+
+  /** Send a band-test message: one CONTROL frame, or segmented if it needs more (§3). */
+  sendTestMessage(m) {
+    const data = buildTestMessage(m);
+    if (data.length <= 8) {
+      return [this.protocol.send({ id: baseId({ prio: PRIO.CONTROL, topic: TOPIC.CONTROL, source: this.address }), data })];
+    }
+    const id = extendedId({ prio: PRIO.CONTROL, type: TOPIC.CONTROL, dest: BROADCAST_EXT, source: this.address, flags: FLAG.SEG });
+    return segment(data).map((f) => this.protocol.send({ id, extended: true, data: f }));
+  }
+
   announce(caps) {
     return this.protocol.send({
       id: baseId({ prio: PRIO.PRESENCE, topic: TOPIC.PRESENCE, source: this.address }),
@@ -517,12 +578,18 @@ export class Session {
     });
   }
 
-  _onFrame(frame) {
-    if (frame.extended) { this._emit('frame', { frame }); return; }
+  _onFrame(frame, at) {
+    if (frame.extended) {
+      const p = parseExtendedId(frame.id);
+      if (p.type === TOPIC.CONTROL && (p.flags & FLAG.SEG)) { this._onLongControl(frame.data, p.source, at); return; }
+      this._emit('frame', { frame });
+      return;
+    }
     const { topic, source } = parseBaseId(frame.id);
 
     if (topic === TOPIC.CONTROL) {
       const c = parseControl(frame.data);
+      if (c && c.op >= CONTROL.TEST_REQUEST) { this._emit('band-test', { message: c, source, at }); return; }
       if (c && c.op >= CONTROL.LINK_PROPOSE) { this._onControl(c, source); return; }
     }
 
@@ -552,5 +619,17 @@ export class Session {
     }
 
     this._emit('frame', { frame, source, topic });
+  }
+
+  /** A CONTROL message segmented in extended frames (§3, §9.1). */
+  _onLongControl(data, source, at) {
+    const key = `control:${source}`;
+    let r = this.reassemblers.get(key);
+    if (!r) { r = new Reassembler(); this.reassemblers.set(key, r); }
+    const res = r.push(data);
+    if (res.error) { this._emit('transport-error', { source, error: res.error }); return; }
+    if (!res.done) return;
+    const c = parseControl(res.data);
+    if (c && c.op >= CONTROL.TEST_REQUEST) this._emit('band-test', { message: c, source, at });
   }
 }
