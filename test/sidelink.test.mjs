@@ -238,10 +238,15 @@ test('two laptops agree on the main bus, then talk on a side link, while the mai
   twoLaptopsWithALink(1);
 });
 
-test('the side link misses no frame whatever its number', {
-  todo: 'numbered 7 (or 100), the link\'s second frame overlaps c\'s main-bus frame and b-link does not '
-    + 'acknowledge it: A at T2 beside C at T5 is within §8.2\'s rule, and still loses the odd frame; '
-    + 'it is retransmitted, so nothing is lost, but the buses do notice each other',
-}, () => {
-  twoLaptopsWithALink(7);
-});
+// Numbered 7 or 100, the link's second frame overlaps c's main-bus frame. A
+// bit edge on A splatters into C's edge window while the link is quiet, and
+// b-link, in its interframe space, takes it for an edge and resynchronizes by
+// SJW; a-link's next SYNC then reaches it before its last INTERMISSION bit's
+// sample point. It used to resync there too, sample SYNC half a bit early and
+// miss the frame; now, when that bit's sample takes it into SYNC, it
+// hard-synchronizes on the edge (Part 1 §5.3, §6.8).
+for (const linkNumber of [7, 100]) {
+  test(`the side link misses no frame when it is numbered ${linkNumber}`, () => {
+    twoLaptopsWithALink(linkNumber);
+  });
+}
