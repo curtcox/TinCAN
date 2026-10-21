@@ -1,0 +1,4 @@
+{
+  "kitchen": { "ssh": "curt@kitchen.local", "os": "macos", "browser": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "name": "kitchen" },
+  "pi":      { "ssh": "pi@pi.local",        "os": "linux", "browser": "google-chrome chromium-browser chromium", "name": "pi", "display": ":0" }
+}

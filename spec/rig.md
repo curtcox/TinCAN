@@ -289,3 +289,41 @@ Each run keeps a folder `runs/<YYYY-MM-DD>/<HHMMSS-name>/` holding:
 | `wav/<id>-<device>-<name>.wav` | Each uploaded recording |
 
 `runs/` is gitignored: the records are data, not source.
+
+## 9. Hosts
+
+The CLI starts and stops the devices' browsers over SSH, so a run needs no
+screen interaction on the machines. Hosts are aliases in a gitignored
+`rig-hosts.json` at the repository root (`rig-hosts.example.json` is the
+committed template):
+
+```json
+{
+  "kitchen": { "ssh": "curt@kitchen.local", "os": "macos", "browser": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "name": "kitchen" },
+  "pi":      { "ssh": "pi@pi.local",        "os": "linux", "browser": "google-chrome chromium-browser chromium", "name": "pi", "display": ":0" }
+}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `ssh` | the alias | The `ssh` target, key-based (BatchMode) |
+| `os` | `"macos"` | `"macos"` or `"linux"` |
+| `browser` | Chrome, or `google-chrome` then `chromium-browser`, `chromium` | Executable or `command -v` candidates |
+| `name` | the alias | The device name the page joins with |
+| `display` | `":0"` | X display, Linux only |
+
+Three commands, each a single `ssh` invocation:
+
+| Command | Remote action |
+|---|---|
+| `rig launch <host>` | Starts Chrome with its own `--user-data-dir` at `…/apps/rig/?code=&name=&auto=1`, leaving the machine's normal profile alone, with the flags that allow the microphone, autoplay and the self-signed certificate without a click |
+| `rig info <host>` | `uname`, then the audio devices and volume (`system_profiler` and `osascript` on macOS, `pactl` on Linux) |
+| `rig stop <host>` | Kills the pid `launch` recorded (a `pkill` matching only the rig's profile dir as fallback), never the machine's normal browser |
+
+`launch` records its browser's pid in `~/.tincan-rig.pid` and refuses to start
+a second while one runs. SSH is used for these commands and nothing else:
+installing software or changing system settings is always asked about first.
+
+Some Chrome versions ignore `--autoplay-policy` for the very first
+navigation; `?auto=1` also clicks Start on load, but if the page still shows
+its Start button one click on the device is needed once.

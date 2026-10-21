@@ -7,11 +7,14 @@
 
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+import {
+  HOSTS_FILE, hostFor, launchScript, stopScript, infoScript,
+} from './rig/hosts.mjs';
 
 const BASE = process.env.RIG_CONTROL || 'http://127.0.0.1:8444';
-const HOSTS_FILE = resolve(dirname(fileURLToPath(import.meta.url)), '../rig-hosts.json');
 
 const print = (obj) => console.log(JSON.stringify(obj, null, 2));
 
@@ -53,15 +56,30 @@ function check(r) {
   return r.json;
 }
 
-const notYet = () => {
-  console.log('not implemented yet: step 5');
-  process.exit(2);
-};
+/** A host alias to its record, or exit 1 saying where it should live. */
+function host(alias) {
+  try {
+    return hostFor(alias, HOSTS_FILE);
+  } catch (err) {
+    console.error(err.message);
+    process.exit(1);
+  }
+}
 
-/** Host aliases for the SSH commands (step 5); absent until the file exists. */
-const hosts = () => {
-  try { return JSON.parse(readFileSync(HOSTS_FILE, 'utf8')); } catch { return {}; }
-};
+/**
+ * One ssh invocation. `capture` collects the remote output so the caller can
+ * print the one-line outcome; otherwise it streams. Exit status is ssh's.
+ */
+function ssh(h, script, { capture = false } = {}) {
+  const r = spawnSync('ssh', ['-o', 'BatchMode=yes', h.ssh, script],
+    capture ? { encoding: 'utf8' } : { stdio: 'inherit' });
+  if (r.error) { console.error(`ssh: ${r.error.message}`); process.exit(1); }
+  if (capture) {
+    if (r.stdout) process.stdout.write(r.stdout);
+    if (r.stderr) process.stderr.write(r.stderr);
+  }
+  process.exit(r.status ?? 1);
+}
 
 function fmtTime(ms) {
   const d = new Date(ms);
@@ -124,7 +142,11 @@ const usage = `usage: node tools/rig.mjs <command>
   run [name]            the current run, or start a new one
   log                   follow the event log
   stop [device|all|host]  stop playback on devices, or SSH-stop a host
-  launch <host>         start a device browser over SSH (step 5)
+  launch <host>         start a device browser over SSH
+  info <host>           a host's audio devices and volume over SSH
+
+SSH hosts are aliases in rig-hosts.json (see spec/rig.html §9). SSH is used
+for these commands only: the rig never installs software or changes settings.
 
 control API: ${BASE} (RIG_CONTROL to change)`;
 
@@ -132,7 +154,11 @@ async function main(argv) {
   const [cmd, ...args] = argv;
   switch (cmd) {
     case 'info': {
-      if (args.length) notYet();                 // an SSH host's audio
+      if (args.length) {
+        const h = host(args[0]);                 // an SSH host's audio
+        console.log(`ssh ${h.ssh}: audio devices and volume`);
+        ssh(h, infoScript(h));
+      }
       print(check(await get('/info')));
       break;
     }
@@ -181,15 +207,21 @@ async function main(argv) {
       if (arg === 'all' || list.some((d) => d.device === arg)) {
         await post('/stop', { to: arg });
       } else {
-        hosts();                                 // a host alias, not a device: SSH stop
-        notYet();
+        const h = host(arg);                     // a host alias, not a device
+        console.log(`ssh ${h.ssh}: stopping the rig's browser`);
+        ssh(h, stopScript(h), { capture: true });
       }
       break;
     }
-    case 'launch':
+    case 'launch': {
       if (!args[0]) { console.error(usage); process.exit(2); }
-      notYet();
+      const h = host(args[0]);
+      const { url, code } = check(await get('/info'));
+      const page = `${url}apps/rig/?code=${code}&name=${encodeURIComponent(h.name)}&auto=1`;
+      console.log(`ssh ${h.ssh}: launching ${h.name}'s browser at ${page}`);
+      ssh(h, launchScript(h, page), { capture: true });
       break;
+    }
     case 'help': case undefined: case '--help': case '-h':
       console.log(usage);
       break;
