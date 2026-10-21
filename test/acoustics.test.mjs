@@ -59,6 +59,8 @@ test('a dominant tone that arrives weaker spends the near-far margin before dist
   const macE = toneBalance(10 ** (-29 / 20), 10 ** (-37 / 20), margin);
   near(macE.tiltDb, -8, 1e-9, 'tilt');
   near(macE.marginDb, 0.6, 1e-9, 'margin left');
+  near(toneBalance(10 ** (-29 / 20), 10 ** (-37 / 20), -margin).marginDb, 0.6, 1e-9,
+    'the margin as nearFarMarginDb() gives it, negative');
   assert.equal(macE.level, 'tight', 'nodes must be at nearly equal distances');
 
   assert.equal(toneBalance(1, 0.3, margin).level, 'fails', '10.5 dB weaker: arbitration fails even side by side');

@@ -127,14 +127,15 @@ export const TIGHT_RATIO = 2;
  *
  * @param {number} recessive received amplitude of `f_R`
  * @param {number} dominant received amplitude of `f_D`
- * @param {number} marginDb the detector's near-far margin, dB
+ * @param {number} marginDb the detector's near-far margin, dB, either sign:
+ *   `nearFarMarginDb()` gives it as the dominant's level relative to the recessive's, −8.7
  * @returns {{tiltDb:number, marginDb:number, ratio:number, level:'ok'|'tight'|'fails'}}
  *   the tilt (dominant relative to recessive), the margin left, the free-field
  *   distance ratio it allows, and whether that is fine, tight or nothing
  */
 export function toneBalance(recessive, dominant, marginDb) {
   const tiltDb = 20 * Math.log10(Math.max(dominant, 1e-12) / Math.max(recessive, 1e-12));
-  const left = marginDb + tiltDb;
+  const left = Math.abs(marginDb) + tiltDb;
   const ratio = left > 0 ? 10 ** (left / 20) : 0;
   return { tiltDb, marginDb: left, ratio, level: left <= 0 ? 'fails' : ratio < TIGHT_RATIO ? 'tight' : 'ok' };
 }

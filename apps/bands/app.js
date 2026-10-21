@@ -179,7 +179,7 @@ for (const b of KEYS) {
 /* measure them                                                        */
 /* ------------------------------------------------------------------ */
 
-const MARGIN_DB = nearFarMarginDb();   // Part 1 §4.6
+const MARGIN_DB = Math.abs(nearFarMarginDb());   // Part 1 §4.6: how much weaker the dominant may arrive
 // Written here, not in the page, so that a page cached from before it still loads.
 $('#measure').parentElement.before(el('p', {
   class: 'note',
