@@ -100,6 +100,7 @@ export function topbar(current) {
     ['../selftest/', 'Self-test'],
     ['../pair/', 'Pair test'],
     ['../bands/', 'Bands'],
+    ['../rig/', 'Rig'],
   ];
   return el('header', { class: 'topbar' },
     el('a', { class: 'brand', href: '../../', html: 'Tin<span>CAN</span>' }),

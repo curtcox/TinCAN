@@ -437,6 +437,7 @@ Ctrl-C to stop`);
   process.on('SIGINT', async () => { await rig.close(); process.exit(0); });
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// argv[1] is empty under `node -e`, which is how CI imports this module.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => { console.error(err.message); process.exit(1); });
 }

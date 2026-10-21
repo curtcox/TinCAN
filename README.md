@@ -131,6 +131,24 @@ To run the tests:
 npm test
 ```
 
+## Testing between real devices
+
+Two tabs on one machine share a speaker and a microphone, which hides the
+problems a bus over air actually has. The test rig puts several machines on
+the LAN under one coordinator, and every device plays and records the same
+audio description on a shared clock — for finding what only shows between
+real machines:
+
+```bash
+npm run rig                    # starts the server; it prints the URL and join code
+node tools/rig.mjs devices     # who has joined
+node tools/rig.mjs send all description.json --wait
+```
+
+The description language, its limits and the wire messages are in
+[spec/rig.md](spec/rig.md); the SSH host list goes in `rig-hosts.json`
+(see `rig-hosts.example.json`).
+
 There is nothing to install. That is deliberate: the implementation, the tests
 and the site build are all plain ES modules and Node's own test runner, so there
 is no lockfile to rot and no dependency to audit. CI enforces it.

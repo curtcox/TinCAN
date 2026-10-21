@@ -36,6 +36,10 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Check the rig server starts
+        run: |
+          node --input-type=module -e "import('./tools/rig/server.mjs').then(async ({startRig}) => { const r = await startRig({port:0, controlPort:0, code:'000000', runsDir:'/tmp/rig-runs', certDir:'/tmp/rig-cert', host:'127.0.0.1', log:()=>{}}); const i = await (await fetch(r.controlUrl + '/info')).json(); if (i.code !== '000000') throw new Error('bad info'); await r.close(); })"
+
       - name: Build the site
         run: npm run build
 
@@ -50,6 +54,8 @@ jobs:
                    _site/apps/simulator/index.html _site/apps/selftest/index.html \
                    _site/apps/bands/index.html _site/apps/bands/acoustics.js _site/apps/bands/sweep.js \
                    _site/apps/pair/index.html _site/apps/sidelink.js \
+                   _site/spec/rig.html _site/apps/rig/index.html _site/apps/rig/app.js \
+                   _site/src/tincan/rig-dsl.js \
                    _site/src/tincan/worklet.js _site/src/tincan/modem.js \
                    _site/src/tincan/bandtest.js _site/src/tincan/tones-worklet.js _site/apps/bandtest.js; do
             test -s "$f" || (echo "missing or empty: $f" && exit 1)

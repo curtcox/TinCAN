@@ -1,6 +1,6 @@
 # Plan: a TinCAN test rig
 
-Status: planned, not started (2026-10-21).
+Status: done (2026-10-21); every step committed to main.
 
 TinCAN's hardest problems show up only between real devices: a speaker
 going silent mid-run, a band whose tones arrive unbalanced, a detector
@@ -112,6 +112,7 @@ Each step is committed and pushed to main.
 5. The SSH commands.
 6. CI file checks and a link from the index page.
 
-## Needed before step 5
+## Needed before use
 
-- The SSH host aliases, and each machine's OS and browser.
+- `rig-hosts.json` — see `rig-hosts.example.json` and spec/rig.md §9 — is
+  where the SSH host aliases, each machine's OS and its browser go.
