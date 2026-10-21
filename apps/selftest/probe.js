@@ -51,7 +51,7 @@ export const MAX_LATENCY = 1.0;
 export const SIGNAL_SECONDS = SCHEDULE.repeatEvery * SCHEDULE.repeats;
 export const RECORD_SECONDS = SIGNAL_SECONDS + MAX_LATENCY;
 
-function chirp(fs) {
+export function chirp(fs) {
   const n = Math.round(SCHEDULE.chirpLen * fs);
   const [f0, f1] = SCHEDULE.chirpHz;
   const out = new Float32Array(n);

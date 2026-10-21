@@ -48,7 +48,7 @@ jobs:
                    _site/spec/rationale.html _site/spec/vectors.html \
                    _site/apps/snooper/index.html _site/apps/console/index.html \
                    _site/apps/simulator/index.html _site/apps/selftest/index.html \
-                   _site/apps/bands/index.html _site/apps/bands/acoustics.js \
+                   _site/apps/bands/index.html _site/apps/bands/acoustics.js _site/apps/bands/sweep.js \
                    _site/apps/pair/index.html _site/apps/sidelink.js \
                    _site/src/tincan/worklet.js _site/src/tincan/modem.js; do
             test -s "$f" || (echo "missing or empty: $f" && exit 1)

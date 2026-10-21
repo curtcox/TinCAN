@@ -63,6 +63,25 @@
   </div>
 
   <div class="panel">
+    <div class="row" style="margin-bottom:.6rem">
+      <h2 style="margin:0">Find this device's range</h2>
+      <span class="spacer"></span>
+      <span id="sweepstate" class="pill">not run</span>
+    </div>
+    <p class="note" style="margin-top:0">Plays a short tone at each of about a hundred frequencies, from 40 Hz
+      to the top of what this sample rate allows, about sixteen seconds in all, and records what this
+      device's own microphone hears of each: the lowest and highest frequencies its speaker and microphone
+      carry. Most of it is audible, and the lowest tones are felt as much as heard. Turn the volume down first.</p>
+    <div class="row">
+      <button id="sweep" class="primary">Find the range</button>
+    </div>
+    <p id="sweepresult" class="note"></p>
+    <div id="sweepchart"></div>
+    <details id="sweepdetails" hidden><summary class="note">Every frequency</summary>
+      <div class="table-scroll"><table id="sweeptable"></table></div></details>
+  </div>
+
+  <div class="panel">
     <h2>How far each band carries</h2>
     <p class="note" style="margin-top:0">Air absorbs high frequencies faster (ISO 9613-1, 20 °C, 50 %
       relative humidity), on top of the 6 dB lost each time the distance doubles, which is the same for

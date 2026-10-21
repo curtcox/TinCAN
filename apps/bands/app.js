@@ -10,6 +10,7 @@ import {
 import { CONTEXT_OPTIONS, audioConstraints } from '../../src/tincan/modem.js';
 import { $, el, topbar, escapeHtml } from '../ui.js';
 import { toneAmplitude, AMPLITUDE } from '../selftest/probe.js';
+import { sweepPlan, sweepSignal, analyseSweep, CARRIES_DB, USABLE_DB } from './sweep.js';
 import {
   phon, hearingThreshold, aWeighting, airAbsorption, shannon, toneBalance, TIGHT_RATIO,
 } from './acoustics.js';
@@ -253,28 +254,46 @@ function noiseLevel(rec, fs, f) {
   return Math.sqrt(sum / Math.max(1, n));
 }
 
-$('#measure').addEventListener('click', async () => {
-  $('#measure').disabled = true;
-  $('#measurestate').textContent = 'playing…';
-  $('#measurestate').className = 'pill live';
+/**
+ * Plays the signal `build(fs)` returns ({signal, seconds, ...}) and records
+ * the microphone in the same audio callbacks, so that the recording and the
+ * signal share one clock. Resolves with the recording, the sample rate, the
+ * microphone's name and whatever else `build` returned.
+ */
+async function playAndRecord(build) {
   let stream = null, ctx = null;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: await audioConstraints('') });
     ctx = new (window.AudioContext || window.webkitAudioContext)(CONTEXT_OPTIONS);
     if (ctx.state === 'suspended') await ctx.resume();
     const fs = ctx.sampleRate;
-    const bands = KEYS.filter((b) => BANDS[b].guardHi * 2 <= fs);
-    const plan = schedule(bands);
+    const built = build(fs);
     await ctx.audioWorklet.addModule(new URL('../selftest/probe-worklet.js', import.meta.url));
     const probe = new AudioWorkletNode(ctx, 'tincan-probe', {
       numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
-      processorOptions: { signal: measureSignal(fs, plan), recordSamples: Math.round(plan.seconds * fs) },
+      processorOptions: { signal: built.signal, recordSamples: Math.round(built.seconds * fs) },
     });
     const done = new Promise((resolve) => { probe.port.onmessage = (e) => resolve(e.data.recording); });
     ctx.createMediaStreamSource(stream).connect(probe);
     probe.connect(ctx.destination);
     const rec = await done;
-    const label = stream.getAudioTracks()[0]?.label || 'the default microphone';
+    return { ...built, rec, fs, label: stream.getAudioTracks()[0]?.label || 'the default microphone' };
+  } finally {
+    if (stream) for (const t of stream.getTracks()) t.stop();
+    if (ctx) ctx.close();
+  }
+}
+
+$('#measure').addEventListener('click', async () => {
+  $('#measure').disabled = true;
+  $('#measurestate').textContent = 'playing…';
+  $('#measurestate').className = 'pill live';
+  try {
+    const { rec, fs, label, bands, plan } = await playAndRecord((fs) => {
+      const bands = KEYS.filter((b) => BANDS[b].guardHi * 2 <= fs);
+      const plan = schedule(bands);
+      return { bands, plan, signal: measureSignal(fs, plan), seconds: plan.seconds };
+    });
 
     const rows = KEYS.map((b) => {
       if (!bands.includes(b)) {
@@ -315,8 +334,95 @@ $('#measure').addEventListener('click', async () => {
     $('#measurestate').textContent = `failed: ${err.message || err}`;
     $('#measurestate').className = 'pill bad';
   } finally {
-    if (stream) for (const t of stream.getTracks()) t.stop();
-    if (ctx) ctx.close();
+    $('#measure').disabled = false;
+  }
+});
+
+/* ------------------------------------------------------------------ */
+/* find the range                                                      */
+/* ------------------------------------------------------------------ */
+
+const SVG = 'http://www.w3.org/2000/svg';
+const svg = (tag, attrs = {}) => {
+  const n = document.createElementNS(SVG, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+  return n;
+};
+
+/** Height above the room's noise against frequency, on a log axis, with the two thresholds. */
+function drawRange(points) {
+  const W = 720, H = 260, L = 44, R = 12, T = 12, B = 34;
+  const fMin = 40, fMax = Math.max(...points.map((p) => p.f));
+  const yMax = Math.max(60, Math.ceil(Math.max(...points.map((p) => p.snrDb)) / 20) * 20);
+  const x = (f) => L + ((Math.log(f) - Math.log(fMin)) / (Math.log(fMax) - Math.log(fMin))) * (W - L - R);
+  const y = (v) => T + (1 - Math.max(0, Math.min(yMax, v)) / yMax) * (H - T - B);
+  const root = svg('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img',
+    'aria-label': 'Height above the room\'s noise against frequency', style: 'max-width:46rem;display:block;font-family:var(--sans)' });
+  for (let v = 0; v <= yMax; v += 20) {
+    root.append(svg('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: 'var(--line)', 'stroke-width': 1 }));
+    const t = svg('text', { x: L - 6, y: y(v) + 4, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--faint)' });
+    t.textContent = `${v}`;
+    root.append(t);
+  }
+  for (const f of [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000].filter((f) => f <= fMax)) {
+    const t = svg('text', { x: x(f), y: H - B + 16, 'text-anchor': 'middle', 'font-size': 11, fill: 'var(--faint)' });
+    t.textContent = f >= 1000 ? `${f / 1000}k` : `${f}`;
+    root.append(t);
+  }
+  const axis = svg('text', { x: W - R, y: H - 4, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--dim)' });
+  axis.textContent = 'Hz';
+  const yAxis = svg('text', { x: L, y: T - 2, 'font-size': 11, fill: 'var(--dim)' });
+  yAxis.textContent = 'dB above the room\'s noise';
+  root.append(axis);
+  for (const [v, name] of [[CARRIES_DB, 'carries well'], [USABLE_DB, 'usable']]) {
+    root.append(svg('line', { x1: L, x2: W - R, y1: y(v), y2: y(v), stroke: 'var(--dim)', 'stroke-width': 1, 'stroke-dasharray': '4 3' }));
+    const t = svg('text', { x: W - R, y: y(v) - 4, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--dim)' });
+    t.textContent = name;
+    root.append(t);
+  }
+  root.append(svg('path', {
+    d: points.map((p, i) => `${i ? 'L' : 'M'}${x(p.f).toFixed(1)},${y(p.snrDb).toFixed(1)}`).join(''),
+    fill: 'none', stroke: 'var(--accent)', 'stroke-width': 2, 'stroke-linejoin': 'round',
+  }));
+  // A hover target per frequency, wider than the line.
+  for (const p of points) {
+    const hit = svg('rect', { x: x(p.f) - 4, y: T, width: 8, height: H - T - B, fill: 'transparent' });
+    const tip = svg('title');
+    tip.textContent = `${hz(p.f)}: ${fmt(p.snrDb, 0)} dB above the noise, ${signed(p.gainDb, 0)} dB speaker to microphone`;
+    hit.append(tip);
+    root.append(hit);
+  }
+  root.prepend(yAxis);
+  $('#sweepchart').replaceChildren(root);
+}
+
+$('#sweep').addEventListener('click', async () => {
+  $('#sweep').disabled = true;
+  $('#measure').disabled = true;
+  $('#sweepstate').textContent = 'playing…';
+  $('#sweepstate').className = 'pill live';
+  try {
+    const { rec, fs, label, plan } = await playAndRecord((fs) => {
+      const plan = sweepPlan(fs);
+      return { plan, signal: sweepSignal(fs, plan), seconds: plan.seconds };
+    });
+    const r = analyseSweep(rec, fs, plan);
+    const span = (x) => (x ? `${hz(x.low)} to ${hz(x.high)}` : 'nowhere');
+    $('#sweepresult').innerHTML = `Carries well (${CARRIES_DB} dB or more above the room's noise) from `
+      + `<b>${span(r.carries)}</b>; usable (${USABLE_DB} dB) from <b>${span(r.usable)}</b>. `
+      + `Measured at ${fs} Hz, ${(r.latency * 1000).toFixed(0)} ms speaker to microphone. Hover the line for each frequency.`;
+    drawRange(r.points);
+    table($('#sweeptable'), ['Frequency', 'Speaker to microphone', 'Above the room\'s noise'],
+      r.points.map((p) => [hz(p.f), `${signed(p.gainDb, 0)} dB`, `${fmt(p.snrDb, 0)} dB`]));
+    $('#sweepdetails').hidden = false;
+    $('#sweepstate').textContent = `measured through ${label}`;
+    $('#sweepstate').className = 'pill ok';
+    window.tincanSweep = { fs, label, ...r };
+  } catch (err) {
+    $('#sweepstate').textContent = `failed: ${err.message || err}`;
+    $('#sweepstate').className = 'pill bad';
+  } finally {
+    $('#sweep').disabled = false;
     $('#measure').disabled = false;
   }
 });
