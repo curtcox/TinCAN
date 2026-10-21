@@ -427,8 +427,12 @@ frame from the other on it. A link that is not up within
 T_link = max(10 s, 4 × the time of a 5-octet frame at the link's profile)
 ```
 
-of the `LINK_ACCEPT` SHOULD be closed with `LINK_CLOSE` reason `1`: the main
-bus can hear both nodes, but the link evidently cannot.
+of the `LINK_ACCEPT` being delivered — for the node that sent it, when its
+transmission completes; for the proposer, when it receives it — SHOULD be
+closed with `LINK_CLOSE` reason `1`: the main bus can hear both nodes, but the
+link evidently cannot. Counting from the decision to accept instead is wrong:
+on a slow main bus the acceptance can wait minutes to be sent, and in a live
+test the accepting node gave up before the proposer had heard it.
 
 Either node may close the link at any time with `LINK_CLOSE` on the main bus,
 and then stops its link node. A node that leaves the main bus closes its links

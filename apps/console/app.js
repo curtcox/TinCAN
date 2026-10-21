@@ -9,7 +9,7 @@ import {
 import { buildTransmission, formatFrame } from '../../src/tincan/frame.js';
 import {
   Session, baseId, describeId, describeControl, parseBaseId, PRIO, TOPIC, segment, BROADCAST_BASE,
-  assessProposal, linkTimeout, DECLINE, DECLINE_TEXT, CLOSE, CLOSE_TEXT,
+  assessProposal, linkTimeout, CONTROL, DECLINE, DECLINE_TEXT, CLOSE, CLOSE_TEXT,
 } from '../../src/tincan/transport.js';
 import {
   $, el, hex, hexBytes, parseHexBytes, parseId, db, download, reportHeader, reportName,
@@ -800,7 +800,7 @@ async function openLink(rec) {
     const ls = new Session({ on: (ev, fn) => m.on(ev, (e) => fn(e.detail)), send: (f) => m.send(f) },
       { address: session.address, callsign: session.callsign });
     link.session = ls;
-    m.on('delivered', () => { link && link.sent++; showLinkCounters(); });
+    m.on('tx-complete', () => { link && link.sent++; showLinkCounters(); });
     m.on('frame', () => { link && link.recv++; showLinkCounters(); });
     m.on('error-frame', (e) => {
       if (!link) return;
@@ -824,12 +824,35 @@ async function openLink(rec) {
     });
     if (rec.proposer === session.address) ls.announce();
     const limit = linkTimeout(rec.profile);
-    link.timer = setTimeout(() => {
-      if (!link || link.up) return;
-      linkLog.add(`nothing heard on #${rec.link} in ${limit.toFixed(0)} s: closing`, 'err');
-      session.closeLink(rec, CLOSE.NO_CONTACT);
-      stopLink();
-    }, limit * 1000);
+    const startTimer = () => {
+      link.timer = setTimeout(() => {
+        if (!link || link.up) return;
+        linkLog.add(`nothing heard on #${rec.link} in ${limit.toFixed(0)} s: closing`, 'err');
+        session.closeLink(rec, CLOSE.NO_CONTACT);
+        stopLink();
+      }, limit * 1000);
+    };
+    if (rec.proposer === session.address) {
+      startTimer();                       // it has heard the acceptance, so it was delivered
+    } else {
+      // Part 2 §8.3: T_link runs from the acceptance's delivery, which on a
+      // slow, busy main bus can be minutes after it was queued.
+      const isAccept = (f) => f && !f.extended && parseBaseId(f.id).topic === TOPIC.CONTROL
+        && f.data?.[0] === CONTROL.LINK_ACCEPT && f.data?.[2] === rec.link;
+      const done = () => { offOk(); offFail(); };
+      const offOk = modem.on('tx-complete', (e) => {
+        if (link?.rec !== rec || !isAccept(e.detail.frame)) return;
+        done();
+        linkLog.add(`acceptance of #${rec.link} delivered; waiting for node ${peer} on band ${rec.band}`);
+        startTimer();
+      });
+      const offFail = modem.on('tx-failed', (e) => {
+        if (link?.rec !== rec || !isAccept(e.detail.item?.frame)) return;
+        done();
+        linkLog.add(`could not deliver the acceptance of #${rec.link}: closing`, 'err');
+        stopLink();
+      });
+    }
   } catch (err) {
     linkLog.add(`could not start the link: ${escapeHtml(err.message || err)}`, 'err');
     session.closeLink(rec, CLOSE.ERRORS);
