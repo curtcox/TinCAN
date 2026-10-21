@@ -108,3 +108,33 @@ export function airAbsorption(f, { celsius = 20, rh = 50, kpa = 101.325 } = {}) 
 export function shannon(hz, snrDb) {
   return hz * Math.log2(1 + 10 ** (snrDb / 10));
 }
+
+/* ------------------------------------------------------------------ */
+/* tone balance and the near-far margin                               */
+/* ------------------------------------------------------------------ */
+
+/** Below this distance ratio a bus's layout is constrained enough to warn about. */
+export const TIGHT_RATIO = 2;
+
+/**
+ * What a device's tone balance leaves of the near-far margin (Part 1 §4.6).
+ *
+ * In arbitration one node's dominant tone has to hold its own against another's
+ * recessive tone, and the margin is in received power. A speaker and
+ * microphone that reproduce `f_D` weaker than `f_R` spend that margin before
+ * distance does; between devices of the same kind every path is tilted alike.
+ * A dominant tone arriving louder widens the margin.
+ *
+ * @param {number} recessive received amplitude of `f_R`
+ * @param {number} dominant received amplitude of `f_D`
+ * @param {number} marginDb the detector's near-far margin, dB
+ * @returns {{tiltDb:number, marginDb:number, ratio:number, level:'ok'|'tight'|'fails'}}
+ *   the tilt (dominant relative to recessive), the margin left, the free-field
+ *   distance ratio it allows, and whether that is fine, tight or nothing
+ */
+export function toneBalance(recessive, dominant, marginDb) {
+  const tiltDb = 20 * Math.log10(Math.max(dominant, 1e-12) / Math.max(recessive, 1e-12));
+  const left = marginDb + tiltDb;
+  const ratio = left > 0 ? 10 ** (left / 20) : 0;
+  return { tiltDb, marginDb: left, ratio, level: left <= 0 ? 'fails' : ratio < TIGHT_RATIO ? 'tight' : 'ok' };
+}

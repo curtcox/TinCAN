@@ -369,6 +369,12 @@ segment size. Consequences:
   ratio) at the cost of a higher false-dominant rate from noise and reverberation.
 - Nodes SHOULD normalise their transmit level and SHOULD NOT run automatic gain
   control on the transmit path.
+- The margin is in received power, so a speaker and microphone that reproduce
+  `f_D` weaker than `f_R` spend it before distance does, on every path between
+  devices of that kind. A MacBook Pro's built-in speaker and microphone measured
+  band E's dominant tone 8 dB below its recessive: 0.6 dB left, so contenders
+  must be at almost exactly equal distances. A dominant tone arriving louder
+  widens the margin instead.
 
 Arbitration failure is **noisy, not silent** — but it does not look the way one
 might expect, and implementations should recognise the signature.

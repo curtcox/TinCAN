@@ -4,11 +4,15 @@
  * to hear and measure them on this device.
  */
 
-import { BANDS, PROFILES, timing, maxRange, bandsCompatible, profileFitsBand } from '../../src/tincan/params.js';
+import {
+  BANDS, PROFILES, timing, maxRange, bandsCompatible, profileFitsBand, nearFarMarginDb,
+} from '../../src/tincan/params.js';
 import { CONTEXT_OPTIONS, audioConstraints } from '../../src/tincan/modem.js';
 import { $, el, topbar, escapeHtml } from '../ui.js';
 import { toneAmplitude, AMPLITUDE } from '../selftest/probe.js';
-import { phon, hearingThreshold, aWeighting, airAbsorption, shannon } from './acoustics.js';
+import {
+  phon, hearingThreshold, aWeighting, airAbsorption, shannon, toneBalance, TIGHT_RATIO,
+} from './acoustics.js';
 
 $('#chrome').replaceWith(topbar('Bands'));
 
@@ -175,6 +179,10 @@ for (const b of KEYS) {
 /* measure them                                                        */
 /* ------------------------------------------------------------------ */
 
+const MARGIN_DB = nearFarMarginDb();   // Part 1 §4.6
+$('#margin').textContent = fmt(MARGIN_DB);
+$('#marginratio').textContent = fmt(10 ** (MARGIN_DB / 20));
+$('#tight').textContent = String(TIGHT_RATIO);
 const QUIET = 0.5;          // seconds of silence first, for the noise
 const TONE = 0.35;          // each tone
 const GAP = 0.15;           // after each tone, for its echo to die and latency
@@ -259,7 +267,7 @@ $('#measure').addEventListener('click', async () => {
 
     const rows = KEYS.map((b) => {
       if (!bands.includes(b)) {
-        return [`<b>${escapeHtml(BANDS[b].name)}</b>`, '—', '—', '—', `not at ${fs} Hz`];
+        return [`<b>${escapeHtml(BANDS[b].name)}</b>`, '—', '—', '—', '—', `not at ${fs} Hz`];
       }
       const cells = tones(b).map((f) => {
         const lvl = heardLevel(rec, fs, f, plan.tones.find(([bb, ff]) => bb === b && ff === f)[2]);
@@ -267,16 +275,29 @@ $('#measure').addEventListener('click', async () => {
         return { lvl, snr: 20 * Math.log10(Math.max(lvl, 1e-9) / Math.max(nse, 1e-9)) };
       });
       const worst = Math.min(...cells.map((c) => c.snr));
-      const verdict = worst >= 30 ? 'carries well' : worst >= 15 ? 'usable, short range' : worst >= 6 ? 'barely' : 'not heard';
+      let verdict = worst >= 30 ? 'carries well' : worst >= 15 ? 'usable, short range' : worst >= 6 ? 'barely' : 'not heard';
+      // Tone balance only matters for a band that is heard at all.
+      const bal = toneBalance(cells[0].lvl, cells[1].lvl, MARGIN_DB);
+      let balance = `${signed(bal.tiltDb, 0)} dB: ${fmt(bal.marginDb)} dB left, ${fmt(bal.ratio)}:1`;
+      if (worst >= 6 && bal.level === 'fails') {
+        balance = `<b>${signed(bal.tiltDb, 0)} dB: no margin left</b>`;
+        verdict = `<b>${verdict}, but cannot arbitrate</b>`;
+      } else if (worst >= 6 && bal.level === 'tight') {
+        balance = `<b>${balance}</b>`;
+        verdict = `<b>${verdict}, but contenders must be at nearly equal distances</b>`;
+      }
       return [
         `<b>${escapeHtml(BANDS[b].name)}</b>`,
         cells.map((c) => `${fmt(20 * Math.log10(Math.max(c.lvl, 1e-9)), 0)}`).join(' / ') + ' dBFS',
         cells.map((c) => `${signed(20 * Math.log10(Math.max(c.lvl, 1e-9) / AMPLITUDE), 0)}`).join(' / ') + ' dB',
         cells.map((c) => fmt(c.snr, 0)).join(' / ') + ' dB',
+        balance,
         verdict,
       ];
     });
-    table($('#measured'), ['Band', 'Heard', 'Speaker to microphone', 'Above the room\'s noise', 'Here'], rows);
+    table($('#measured'), ['Band', 'Heard', 'Speaker to microphone', 'Above the room\'s noise',
+      `Dominant vs recessive<br><span class="muted">and what it leaves of the ${fmt(MARGIN_DB)} dB margin</span>`,
+      'Here'], rows);
     $('#measurestate').textContent = `measured through ${label}`;
     $('#measurestate').className = 'pill ok';
   } catch (err) {

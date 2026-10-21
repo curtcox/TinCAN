@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  phon, splForPhon, hearingThreshold, aWeighting, airAbsorption, shannon,
+  phon, splForPhon, hearingThreshold, aWeighting, airAbsorption, shannon, toneBalance,
 } from '../apps/bands/acoustics.js';
 
 const near = (actual, expected, tol, what) =>
@@ -46,4 +46,24 @@ test('ISO 9613-1 air absorption reproduces the 10 °C, 70 % table of ISO 9613-2'
 test('Shannon capacity', () => {
   near(shannon(1000, 0), 1000, 1e-9, '0 dB');
   near(shannon(2250, 30), 22427, 1, 'a band\'s slot at 30 dB');
+});
+
+test('a dominant tone that arrives weaker spends the near-far margin before distance does', () => {
+  const margin = 8.6;
+  const even = toneBalance(0.1, 0.1, margin);
+  near(even.tiltDb, 0, 1e-9, 'even tones');
+  near(even.ratio, 2.69, 0.01, 'the free-field 2.7:1 of §4.6');
+  assert.equal(even.level, 'ok');
+
+  // This MacBook Pro on band E: 650 Hz at −29 dBFS, 900 Hz at −37 dBFS.
+  const macE = toneBalance(10 ** (-29 / 20), 10 ** (-37 / 20), margin);
+  near(macE.tiltDb, -8, 1e-9, 'tilt');
+  near(macE.marginDb, 0.6, 1e-9, 'margin left');
+  assert.equal(macE.level, 'tight', 'nodes must be at nearly equal distances');
+
+  assert.equal(toneBalance(1, 0.3, margin).level, 'fails', '10.5 dB weaker: arbitration fails even side by side');
+  assert.equal(toneBalance(0.3, 1, margin).level, 'ok', 'a louder dominant widens the margin');
+  near(toneBalance(0.3, 1, margin).marginDb, margin + 20 * Math.log10(1 / 0.3), 1e-9, 'by its tilt');
+  assert.equal(toneBalance(1, 10 ** (-3 / 20), margin).level, 'tight', '3 dB weaker leaves under 2:1');
+  assert.equal(toneBalance(1, 10 ** (-2 / 20), margin).level, 'ok', '2 dB weaker leaves over 2:1');
 });
