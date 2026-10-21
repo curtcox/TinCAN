@@ -56,14 +56,6 @@
     <p class="note" style="margin-top:0">Plays each band's two tones in turn, about six seconds in all, and
       records what this device's own microphone hears: whether its speaker and microphone can carry the band
       at all, and how far above the room's noise. A band its own microphone barely hears will not carry far.</p>
-    <p class="note">It also compares the two tones. In arbitration one node's dominant tone has to hold its own
-      against another's recessive tone, which it can do arriving up to <span id="margin"></span> dB weaker
-      (<a href="../../spec/tincan-1.0.html#46-near-far-limit">Part 1 §4.6</a>): in open air, a contender up to
-      <span id="marginratio"></span> times as far away. A speaker and microphone that reproduce the dominant
-      tone weaker than the recessive spend that margin before distance does, on every path between devices
-      like this one. The page warns when what is left allows less than a <span id="tight"></span>:1 distance
-      ratio. Below 1 kHz the balance also depends on where the device sits in the room, so measure where it
-      will be used.</p>
     <div class="row">
       <button id="measure" class="primary">Measure the bands</button>
     </div>

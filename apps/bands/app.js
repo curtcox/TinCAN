@@ -180,9 +180,17 @@ for (const b of KEYS) {
 /* ------------------------------------------------------------------ */
 
 const MARGIN_DB = nearFarMarginDb();   // Part 1 §4.6
-$('#margin').textContent = fmt(MARGIN_DB);
-$('#marginratio').textContent = fmt(10 ** (MARGIN_DB / 20));
-$('#tight').textContent = String(TIGHT_RATIO);
+// Written here, not in the page, so that a page cached from before it still loads.
+$('#measure').parentElement.before(el('p', {
+  class: 'note',
+  html: 'It also compares the two tones. In arbitration one node\'s dominant tone has to hold its own against '
+    + `another's recessive tone, which it can do arriving up to ${fmt(MARGIN_DB)} dB weaker `
+    + '(<a href="../../spec/tincan-1.0.html#46-near-far-limit">Part 1 §4.6</a>): in open air, a contender up to '
+    + `${fmt(10 ** (MARGIN_DB / 20))} times as far away. A speaker and microphone that reproduce the dominant tone `
+    + 'weaker than the recessive spend that margin before distance does, on every path between devices like this '
+    + `one. The page warns when what is left allows less than a ${TIGHT_RATIO}:1 distance ratio. Below 1 kHz the `
+    + 'balance also depends on where the device sits in the room, so measure where it will be used.',
+}));
 const QUIET = 0.5;          // seconds of silence first, for the noise
 const TONE = 0.35;          // each tone
 const GAP = 0.15;           // after each tone, for its echo to die and latency
