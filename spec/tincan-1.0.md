@@ -168,7 +168,8 @@ out-of-band configuration; TinCAN has no in-band band negotiation.
 | `0x02` | **B — near-ultrasonic** | 17250 Hz | 18500 Hz | 16750 Hz | 19000 Hz | Requires ≥44.1 kHz sampling and hardware with usable response above 17 kHz. Inaudible to most adults. Range is short and highly directional. |
 | `0x03` | **C — low** | 1000 Hz | 2250 Hz | 500 Hz | 2750 Hz | For small transducers and poor high-frequency response. Most exposed to ambient noise (speech, HVAC, traffic). |
 | `0x04` | **D — line** | 6000 Hz | 7250 Hz | 5500 Hz | 7750 Hz | For a physical audio cable between devices, or a loopback device. Not intended for air. |
-| `0x00`, `0x05`–`0xEF` | reserved | | | | | |
+| `0x05` | **E — deep** | 650 Hz | 900 Hz | 550 Hz | 1000 Hz | The lowest pitch: diffracts round corners and through doorways best, and is absorbed least by air. Needs a speaker with real output below 1 kHz. Sits among the vowels of speech. **`TQ` ≥ 5 ms only** (`T10` and slower). |
+| `0x00`, `0x06`–`0xEF` | reserved | | | | | |
 | `0xF0`–`0xFF` | experimental | | | | | Available for private use; MUST NOT be assumed interoperable. |
 
 Tone frequencies are chosen so that no harmonic of `f_R` falls on `f_D` or on
@@ -178,6 +179,23 @@ dominant, which would break arbitration; the reverse case is harmless.
 
 Implementations MUST NOT round tone frequencies to a DFT bin grid derived from
 their own sample rate. The detector in §4.4 has no such requirement.
+
+**Band layout and the time quantum.** The detector's shortest window, the edge
+window, is 2 `TQ` long (2 ms at `T100`, §4.4.1), so its main lobe spreads about `1/TQ` either side
+of each tone. Bands A–D are laid out for `T100`'s 1 ms `TQ`: tones 1250 Hz
+apart, guards 500 Hz outside them. A band works at a profile when
+
+```
+f_D − f_R             ≥  1250 Hz · (1 ms / TQ)
+min(f_R − guard_lo,
+    guard_hi − f_D)   ≥   500 Hz · (1 ms / TQ)
+```
+
+Band E is the same layout at a fifth of the scale, which is how it fits below
+1 kHz, so it needs `TQ` ≥ 5 ms. A node MUST NOT run a band at a profile whose
+`TQ` is shorter than this. In the reference simulation band E carries frames and
+arbitrates at `T10`, `T5`, `T4` and `T2` as bands A and C do, and fails at `T25`
+and faster.
 
 ### 4.3 Transmitter requirements
 

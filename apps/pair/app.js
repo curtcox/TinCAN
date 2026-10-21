@@ -11,7 +11,7 @@ import { formatFrame } from '../../src/tincan/frame.js';
 import {
   Session, describeControl, parseBaseId, TOPIC, assessProposal, DECLINE_TEXT, CLOSE_TEXT,
 } from '../../src/tincan/transport.js';
-import { $, el, LogView, topbar, escapeHtml, download, reportHeader, reportName } from '../ui.js';
+import { $, el, LogView, topbar, escapeHtml, download, reportHeader, reportName, fitProfiles } from '../ui.js';
 import { LinkEnd } from '../sidelink.js';
 
 $('#chrome').replaceWith(topbar('Pair test'));
@@ -47,9 +47,11 @@ function describePlan() {
   if (!PROFILES[main] || !PROFILES[link] || !BANDS[$('#band').value] || !BANDS[$('#linkband').value]) return;
   const ok = bandsCompatible($('#band').value, main, $('#linkband').value, link);
   $('#plan').innerHTML = `About ${Math.round(budgetSeconds() / 2 / 60)}–${Math.ceil(budgetSeconds() / 60)} minutes. `
-    + `${['A', 'C', 'D'].includes($('#band').value) || ['A', 'C', 'D'].includes($('#linkband').value) ? '<b>Some of it is audible.</b> ' : ''}`
+    + `${$('#band').value !== 'B' || $('#linkband').value !== 'B' ? '<b>Some of it is audible.</b> ' : ''}`
     + (ok ? '' : '<b>These two can not share a device (Part 2 §8.2): bob will decline.</b>');
 }
+$('#band').addEventListener('change', () => fitProfiles($('#profile'), $('#band').value));
+$('#linkband').addEventListener('change', () => fitProfiles($('#linkprofile'), $('#linkband').value));
 for (const s of ['#band', '#profile', '#linkband', '#linkprofile']) $(s).addEventListener('change', describePlan);
 describePlan();
 
@@ -247,7 +249,7 @@ $('#start').addEventListener('click', async () => {
       check('proposal');
       const reason = assessProposal(rec, {
         mainBand: run.settings.band, mainProfile: run.settings.profile, slopMs: null,
-        bandsInUse: bob.session.bandsInUse(), canUseBand: (b) => b !== 'B' || bob.modem.ctx.sampleRate >= 44100,
+        linksInUse: bob.session.linksInUse(), canUseBand: (b) => b !== 'B' || bob.modem.ctx.sampleRate >= 44100,
       });
       if (reason) {
         bob.session.declineLink(rec, reason);

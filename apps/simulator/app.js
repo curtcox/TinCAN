@@ -11,11 +11,11 @@ import { AcousticChannel, mulberry32 } from '../../src/tincan/bus.js';
 import { BANDS, PROFILES, timing, maxRange, nearFarMarginDb } from '../../src/tincan/params.js';
 import { SCENARIOS } from './scenarios.js';
 import { formatFrame } from '../../src/tincan/frame.js';
-import { $, el, LogView, topbar, escapeHtml } from '../ui.js';
+import { $, el, LogView, topbar, escapeHtml, fitProfiles } from '../ui.js';
 
 $('#chrome').replaceWith(topbar('Simulator'));
 
-const SIM_RATE = 16000;   // enough for bands A, C and D; band B needs more
+const SIM_RATE = 16000;   // enough for bands A, C, D and E; band B needs more
 
 /* ---------------------------------------------------------------- */
 /* scenarios                                                         */
@@ -47,6 +47,7 @@ function loadScenario() {
   const s = SCENARIOS[scenarioSel.value];
   $('#desc').innerHTML = escapeHtml(s.description);
   profSel.value = s.profile || 'T25';
+  fitProfiles(profSel, bandSel.value);
   $('#noise').value = String(Math.round((s.noise ?? 0.0005) * 2000));
   $('#rt60').value = String(Math.round((s.rt60 ?? 0) * 100));
   $('#rc').value = '18';
@@ -81,6 +82,11 @@ for (const id of ['#noise', '#rt60', '#rc', '#selfgain', '#selflat', '#duration'
 }
 profSel.addEventListener('change', () => { syncLabels(); drawRoom(SCENARIOS[scenarioSel.value]); });
 scenarioSel.addEventListener('change', loadScenario);
+bandSel.addEventListener('change', () => {
+  fitProfiles(profSel, bandSel.value);
+  syncLabels();
+  drawRoom(SCENARIOS[scenarioSel.value]);
+});
 
 function renderNodes(s) {
   const box = $('#nodes');

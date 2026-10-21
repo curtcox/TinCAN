@@ -17,6 +17,10 @@ export const BANDS = {
        note: 'For small transducers. Most exposed to ambient noise.' },
   D: { id: 0x04, name: 'D — line',            fR: 6000,  fD: 7250,  guardLo: 5500,  guardHi: 7750,
        note: 'For a physical audio cable or loopback. Not intended for air.' },
+  // A fifth the spacing of the others, so it needs five times the time
+  // quantum (minTqMs below): T10 and slower.
+  E: { id: 0x05, name: 'E — deep',            fR: 650,   fD: 900,   guardLo: 550,   guardHi: 1000,
+       note: 'Lowest pitch: carries round corners and through doors best. T10 and slower only. Competes with speech.' },
 };
 
 /**
@@ -108,18 +112,48 @@ export const bandById = (id) => Object.keys(BANDS).find((k) => BANDS[k].id === i
 export const profileById = (id) => Object.keys(PROFILES).find((k) => PROFILES[k].id === id) ?? null;
 
 /**
+ * Band geometry scales with the time quantum. The detector's shortest window,
+ * the edge window, is 2 TQ long, so a tone's main lobe spreads about 1/TQ
+ * either side of it. Bands A–D were laid out for T100's 1 ms TQ: tones
+ * 1250 Hz apart and guards 500 Hz outside them. At TQ 5 ms the same layout
+ * shrinks to a fifth, which is how band E fits below 1 kHz.
+ */
+const TONE_SPACING_HZ_MS = 1250;
+const GUARD_OFFSET_HZ_MS = 500;
+
+/** The shortest time quantum a band's layout allows, ms — spec §4.2. */
+export function minTqMs(band) {
+  const b = typeof band === 'string' ? BANDS[band] : band;
+  const guard = Math.min(b.fR - b.guardLo, b.guardHi - b.fD);
+  return Math.max(TONE_SPACING_HZ_MS / (b.fD - b.fR), GUARD_OFFSET_HZ_MS / guard);
+}
+
+/** Whether `profile` can run on `band` — spec §4.2. */
+export const profileFitsBand = (band, profile) => PROFILES[profile].tqMs >= minTqMs(band);
+
+/**
+ * How close one band's tones come to a frequency the other band's detector
+ * measures (its tones and guards), Hz.
+ */
+export function bandGapHz(a, b) {
+  const near = (x, y) => Math.min(...[x.fR, x.fD].flatMap((t) =>
+    [y.fR, y.fD, y.guardLo, y.guardHi].map((f) => Math.abs(t - f))));
+  return Math.min(near(BANDS[a], BANDS[b]), near(BANDS[b], BANDS[a]));
+}
+
+/**
  * Whether two buses, on bands `a` and `b` with profiles `pa` and `pb`, can run
  * on the same devices at once without disturbing each other — Part 2 §8.2.
- * Bands whose guard ranges overlap (A and C) sit 250 Hz from each other's
- * tones, close enough that each bit edge's switching splatter reaches the
- * other's guard bins through a short edge window. In simulation A and C both
- * at T25 fail, and pairs at T10 or slower do not, nor does any other pair.
+ * Each bit edge splatters a tone's energy across the main lobe of the other
+ * bus's edge window, so the gap between the bands must be as wide, at the
+ * shorter TQ of the two, as a band's own tone
+ * spacing: 1250 Hz at 1 ms. A and C sit 250 Hz apart and need TQ ≥ 5 ms on
+ * both; in simulation they fail at T25 and work at T10. C's recessive tone is
+ * E's high guard, so C and E never share.
  */
 export function bandsCompatible(a, pa, b, pb) {
   if (a === b) return false;
-  const A = BANDS[a], B = BANDS[b];
-  const overlap = A.guardLo <= B.guardHi && B.guardLo <= A.guardHi;
-  return !overlap || (PROFILES[pa].tqMs >= 5 && PROFILES[pb].tqMs >= 5);
+  return bandGapHz(a, b) * Math.min(PROFILES[pa].tqMs, PROFILES[pb].tqMs) >= TONE_SPACING_HZ_MS;
 }
 
 /**
@@ -132,10 +166,10 @@ export function longestRangeProfile() {
 
 /**
  * The fastest profile that can still arbitrate on a device whose t_slop is
- * `slopMs` (spec §5.6), or null if none can.
+ * `slopMs` (spec §5.6), and that `band` allows (§4.2), or null if none can.
  */
-export function fastestProfileFor(slopMs) {
-  return Object.keys(PROFILES).find((key) => maxRange(key, slopMs) > 0) ?? null;
+export function fastestProfileFor(slopMs, band = null) {
+  return Object.keys(PROFILES).find((key) => maxRange(key, slopMs) > 0 && (!band || profileFitsBand(band, key))) ?? null;
 }
 
 /**

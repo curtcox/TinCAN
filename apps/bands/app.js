@@ -1,10 +1,10 @@
 /**
- * TinCAN Bands — how the four bands compare in loudness, reach and capacity,
+ * TinCAN Bands — how the five bands compare in loudness, reach and capacity,
  * computed from the band plan and the standards in acoustics.js, plus a way
  * to hear and measure them on this device.
  */
 
-import { BANDS, PROFILES, timing, maxRange, bandsCompatible } from '../../src/tincan/params.js';
+import { BANDS, PROFILES, timing, maxRange, bandsCompatible, profileFitsBand } from '../../src/tincan/params.js';
 import { CONTEXT_OPTIONS, audioConstraints } from '../../src/tincan/modem.js';
 import { $, el, topbar, escapeHtml } from '../ui.js';
 import { toneAmplitude, AMPLITUDE } from '../selftest/probe.js';
@@ -25,6 +25,8 @@ const HEARD_BY = {
     + 'often find it shrill. Pets, especially dogs and cats, hear it easily.',
   C: 'Everyone with normal hearing; it sits in the range of speech.',
   D: 'Everyone with normal hearing, a little less keenly than A.',
+  E: 'Everyone with normal hearing, less keenly than A or C. It sits among the vowels of speech, so it is '
+    + 'easily masked by talk and blends into it rather than standing out.',
 };
 
 function table(node, head, rows) {
@@ -83,35 +85,44 @@ table($('#carry'),
 
 const FRAME_BITS = 123;                               // 8-octet base frame, no stuffing (Part 1 App. A)
 const slotHz = (b) => BANDS[b].guardHi - BANDS[b].guardLo;
-const fastest = timing('T100').bitRate;
+/** The fastest profile a band's tone spacing allows (Part 1 §4.2). */
+const fastestOn = (b) => Object.keys(PROFILES).find((p) => profileFitsBand(b, p));
 
 table($('#rates'),
-  ['Profile', 'Bit rate', '8-octet frame', 'User data', 'Arbitration range', 'Same on every band'],
+  ['Profile', 'Bit rate', '8-octet frame', 'User data', 'Arbitration range', 'Bands'],
   Object.keys(PROFILES).map((p) => {
     const t = timing(p);
     return [
       `<code>${p}</code>`, `${fmt(t.bitRate, t.bitRate < 10 ? 0 : 0)} bit/s`, `${(FRAME_BITS / t.bitRate).toFixed(1)} s`,
-      `${(8 * t.bitRate / FRAME_BITS).toFixed(2)} octet/s`, `~${maxRange(p).toFixed(1)} m`, '✓',
+      `${(8 * t.bitRate / FRAME_BITS).toFixed(2)} octet/s`, `~${maxRange(p).toFixed(1)} m`,
+      KEYS.filter((b) => profileFitsBand(b, p)).join(' '),
     ];
   }));
 
 table($('#capacity'),
   ['Band', 'Slot', 'Could carry<br><span class="muted">Shannon, at 20 / 30 / 40 dB SNR</span>',
-    'TinCAN at T100 uses', 'Can share a device with', 'Needs'],
+    'TinCAN at its fastest uses', 'Can share a device with', 'Needs'],
   KEYS.map((b) => {
     const others = KEYS.filter((o) => o !== b).map((o) => {
-      if (bandsCompatible(b, 'T25', o, 'T25')) return o;
-      return bandsCompatible(b, 'T10', o, 'T10') ? `${o} <span class="muted">(T10 and slower)</span>` : null;
+      // The fastest profile both bands allow, then the fastest at which they share.
+      const both = Object.keys(PROFILES).filter((p) => profileFitsBand(b, p) && profileFitsBand(o, p));
+      const p = both.find((q) => bandsCompatible(b, q, o, q));
+      if (!p) return null;
+      return p === both[0] ? o : `${o} <span class="muted">(${p} and slower)</span>`;
     }).filter(Boolean);
     const c30 = shannon(slotHz(b), 30);
+    const top = fastestOn(b);
     return [
       `<b>${escapeHtml(BANDS[b].name)}</b>`,
       `${hz(BANDS[b].guardLo)}–${hz(BANDS[b].guardHi)}`,
       [20, 30, 40].map((s) => `${(shannon(slotHz(b), s) / 1000).toFixed(0)}`).join(' / ') + ' kbit/s',
-      `${(100 * fastest / c30).toFixed(2)} % <span class="muted">of it at 30 dB</span>`,
+      `${(100 * timing(top).bitRate / c30).toFixed(2)} % <span class="muted">of it at 30 dB, at ${top}</span>`,
       others.join(', '),
       b === 'B' ? 'a sample rate of 44.1 kHz or more, and a speaker and microphone that reach 19 kHz'
-        : b === 'D' ? 'nothing in principle; intended for a cable' : 'nothing special',
+        : b === 'D' ? 'nothing in principle; intended for a cable'
+          : b === 'E' ? `${top} or slower, since its tones are a fifth as far apart; and a speaker with real `
+            + 'output below 1 kHz, which a phone\'s or a thin laptop\'s may barely have'
+            : 'nothing special',
     ];
   }));
 

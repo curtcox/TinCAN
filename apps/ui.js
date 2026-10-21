@@ -1,6 +1,6 @@
 /** Small shared helpers for the TinCAN apps. No framework. */
 
-import { DETECTOR_DEFAULTS } from '../src/tincan/params.js';
+import { DETECTOR_DEFAULTS, BANDS, PROFILES, profileFitsBand } from '../src/tincan/params.js';
 import { listMicrophones, wirelessMicReason, builtInMicrophone, CONTEXT_OPTIONS } from '../src/tincan/modem.js';
 import { BUILD, describeBuild } from '../version.js';
 
@@ -179,6 +179,18 @@ export function reportHeader() {
 export function reportName(kind, ext) {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   return `tincan-${kind}-${describeBuild(BUILD).short}-${stamp}.${ext}`;
+}
+
+/**
+ * Disables the profiles in `select` that are too fast for `band` (spec §4.2),
+ * and moves off one if it was chosen, to the fastest that fits.
+ */
+export function fitProfiles(select, band) {
+  if (!BANDS[band]) return;
+  for (const o of select.options) o.disabled = !profileFitsBand(band, o.value);
+  if (PROFILES[select.value] && !profileFitsBand(band, select.value)) {
+    select.value = Object.keys(PROFILES).find((p) => profileFitsBand(band, p));
+  }
 }
 
 export function escapeHtml(s) {

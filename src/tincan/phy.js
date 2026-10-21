@@ -7,8 +7,10 @@
  * simulator, which is why it may not touch anything browser-specific.
  */
 
-import { BANDS, PROFILES, DETECTOR_DEFAULTS, timing } from './params.js';
+import { BANDS, PROFILES, DETECTOR_DEFAULTS, timing, minTqMs } from './params.js';
 import { DOMINANT, RECESSIVE, STATE } from './protocol.js';
+
+const bandName = (b) => Object.keys(BANDS).find((k) => BANDS[k] === b) ?? `${b.fR}/${b.fD} Hz`;
 
 /** Goertzel power of a windowed block, read from a ring buffer. */
 function goertzel(ring, mask, endIndex, length, coeff, win) {
@@ -57,6 +59,11 @@ export class Phy {
     this.band = typeof opts.band === 'string' ? BANDS[opts.band] : (opts.band || BANDS.A);
     this.profileKey = typeof opts.profile === 'string' ? opts.profile : null;
     const prof = typeof opts.profile === 'string' ? PROFILES[opts.profile] : (opts.profile || PROFILES.T25);
+    // A band laid out for longer windows than the profile's misreads its own
+    // tones (spec §4.2): refuse rather than run a bus that cannot work.
+    if (prof.tqMs < minTqMs(this.band)) {
+      throw new Error(`band ${bandName(this.band)} needs a time quantum of at least ${minTqMs(this.band)} ms`);
+    }
     this.t = timing(prof);
     this.amplitude = opts.amplitude ?? 0.25;
     this.thetaD = opts.thetaD ?? DETECTOR_DEFAULTS.thetaD;

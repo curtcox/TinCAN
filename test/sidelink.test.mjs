@@ -54,6 +54,20 @@ test('a proposal is judged by band, by what can share the devices, and by both a
   assert.equal(bandsCompatible('A', 'T10', 'C', 'T10'), true);
   assert.equal(bandsCompatible('A', 'T25', 'C', 'T10'), false);
   assert.equal(bandsCompatible('A', 'T100', 'B', 'T100'), true);
+  assert.equal(bandsCompatible('A', 'T100', 'D', 'T100'), true, 'A and D are 1250 Hz apart, as a band\'s own tones');
+
+  // Band E: T10 and slower only, and never beside C, whose recessive tone is its upper guard.
+  assert.equal(assessProposal({ band: 'E', profile: 'T5', slopMs: 62 }, laptop), null, 'E at T5');
+  assert.equal(assessProposal({ band: 'E', profile: 'T25', slopMs: 2 }, { mainBand: 'A', mainProfile: 'T25', slopMs: 2 }),
+    DECLINE.TIMING, 'E is too narrow for T25');
+  assert.equal(assessProposal({ band: 'E', profile: 'T2', slopMs: 62 }, { ...laptop, mainBand: 'C' }), DECLINE.BUSY,
+    'E beside a main bus on C');
+  assert.equal(assessProposal({ band: 'C', profile: 'T5', slopMs: 62 }, { ...laptop, linksInUse: [{ band: 'E', profile: 'T2' }] }),
+    DECLINE.BUSY, 'C beside a link on E');
+  assert.equal(assessProposal({ band: 'D', profile: 'T5', slopMs: 62 }, { ...laptop, linksInUse: [{ band: 'E', profile: 'T2' }] }),
+    null, 'D beside a link on E');
+  for (const p of ['T10', 'T2']) assert.equal(bandsCompatible('C', p, 'E', p), false, `C and E at ${p}`);
+  for (const o of ['A', 'B', 'D']) assert.equal(bandsCompatible(o, 'T100', 'E', 'T10'), true, `${o} at any profile beside E`);
   assert.equal(linkTimeout('T100'), 10, 'at least ten seconds');
   assert.ok(Math.abs(linkTimeout('T5') - 79.2) < 1e-9, 'four 5-octet frames');
 });
@@ -110,6 +124,45 @@ test('a proposal, an acceptance and a close, as each node sees them', () => {
   assert.equal(atA.at(-1)[0], 'link-declined');
   assert.equal(atA.at(-1)[1].reason, DECLINE.BAND);
   assert.equal(second.state, 'declined');
+});
+
+/**
+ * A main bus of three nodes contends while two of them, on the same devices,
+ * keep a second bus busy; returns each bus's error count.
+ */
+function shareDevices(main, link) {
+  const ch = new AcousticChannel({
+    sampleRate: 16000, band: main[0], profile: main[1], noise: 0.0005, random: mulberry32(7),
+    deviceLatencyMs: 3, selfDelayMs: 0.5,             // fast devices, for T25
+    nodes: [
+      { name: 'primer', x: 0.4, y: -0.3, device: 'P' },
+      { name: 'lo', x: 0, y: 0, device: 'L' },
+      { name: 'hi', x: 1, y: 0, device: 'H' },
+      { name: 'l1', x: 0, y: 0, device: 'L', band: link[0], profile: link[1] },
+      { name: 'l2', x: 1, y: 0, device: 'H', band: link[0], profile: link[1] },
+    ],
+  });
+  const [primer, lo, hi, l1, l2] = ch.protocols;
+  for (let i = 0; i < 6; i++) { l1.send({ id: 0x100 + i, data: [i, 1, 2, 3] }); l2.send({ id: 0x180 + i, data: [i] }); }
+  primer.send({ id: 0x7ff, data: [0] });
+  ch.run(30 * 0.1);
+  lo.send({ id: 0x201, data: [1, 2, 3] });
+  hi.send({ id: 0x205, data: [2] });
+  ch.run(150);
+  const errors = (ps) => ps.reduce((n, { stats: s }) => n + s.bitErrors + s.stuffErrors + s.crcErrors + s.formErrors, 0);
+  return {
+    main: errors([primer, lo, hi]), link: errors([l1, l2]),
+    sent: [primer, lo, hi, l1, l2].map((p) => p.stats.framesSent),
+  };
+}
+
+test('band E shares a device with a bus on A, and not with one on C (Part 2 §8.2)', () => {
+  const withA = shareDevices(['A', 'T25'], ['E', 'T10']);
+  assert.deepEqual([withA.main, withA.link], [0, 0], 'A at T25 beside E at T10: no errors on either');
+  assert.deepEqual(withA.sent, [1, 1, 1, 6, 6], 'and every frame sent');
+
+  const withC = shareDevices(['C', 'T10'], ['E', 'T10']);
+  assert.ok(withC.main + withC.link > 0, 'C beside E: they corrupt each other');
 });
 
 test('two laptops agree on the main bus, then talk on a side link, while the main bus carries on', () => {

@@ -10,7 +10,7 @@ import { BANDS, PROFILES, timing, maxRange, longestRangeProfile } from '../../sr
 import { describeId, describePci, describeControl, TOPIC, parseBaseId } from '../../src/tincan/transport.js';
 import {
   $, el, hex, hexBytes, asciiBytes, LogView, topbar, escapeHtml, download, db, reportHeader, reportName,
-  drawBits as drawBitStrip, drawMeter as drawLevels, fillMicrophones,
+  drawBits as drawBitStrip, drawMeter as drawLevels, fillMicrophones, fitProfiles,
 } from '../ui.js';
 
 $('#chrome').replaceWith(topbar('Snooper'));
@@ -43,7 +43,7 @@ function describePhy() {
     + `${(t.window * 1000).toFixed(0)} ms. Arbitration works out to about `
     + `${maxRange(profSel.value).toFixed(1)} m.`;
 }
-bandSel.addEventListener('change', describePhy);
+bandSel.addEventListener('change', () => { fitProfiles(profSel, bandSel.value); describePhy(); });
 profSel.addEventListener('change', describePhy);
 describePhy();
 fillMicrophones($('#mic'), $('#micadvice'));

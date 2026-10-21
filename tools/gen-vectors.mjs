@@ -6,7 +6,7 @@
 
 import { crc17 } from '../src/tincan/crc.js';
 import { buildCore, buildTransmission } from '../src/tincan/frame.js';
-import { timing, PROFILES, BANDS, maxRange, nearFarMarginDb } from '../src/tincan/params.js';
+import { timing, PROFILES, BANDS, maxRange, nearFarMarginDb, minTqMs } from '../src/tincan/params.js';
 
 /** The frames whose vectors are published. Keep this list stable. */
 export const VECTOR_FRAMES = [
@@ -137,10 +137,10 @@ export function buildVectors() {
   p();
   p('### Bands');
   p();
-  p('| Band | `f_R` | `f_D` | Guards | Separation |');
-  p('|---|---|---|---|---|');
+  p('| Band | `f_R` | `f_D` | Guards | Separation | Shortest `TQ` |');
+  p('|---|---|---|---|---|---|');
   for (const b of Object.values(BANDS)) {
-    p(`| ${b.name} | ${b.fR} Hz | ${b.fD} Hz | ${b.guardLo} / ${b.guardHi} Hz | ${b.fD - b.fR} Hz |`);
+    p(`| ${b.name} | ${b.fR} Hz | ${b.fD} Hz | ${b.guardLo} / ${b.guardHi} Hz | ${b.fD - b.fR} Hz | ${minTqMs(b)} ms |`);
   }
   p();
   p('### Bit timing');

@@ -383,12 +383,12 @@ address. The first payload octet of a `CONTROL` frame is an opcode:
 | to | 1 | The node invited, or `31` for any node that wants to join |
 | proposer, peer | 1 | The node the message answers or is addressed to |
 | link | 1 | Chosen by the proposer; with the proposer's address it names the link |
-| band | 1 | Part 1 §4.2 band ID, `0x01`–`0x04` |
+| band | 1 | Part 1 §4.2 band ID, `0x01`–`0x05` |
 | profile | 1 | Part 1 §5.2 profile ID, `0x10`–`0x16` |
 | t_slop | 1 | The sender's measured t_slop (Part 1 §5.6) in ms, 0–254; `255` if unknown |
 
 `LINK_DECLINE` reasons: `1` band not usable here, `2` timing — the profile
-cannot cover both nodes' t_slop, `3` busy — the band is in use by the main
+cannot cover both nodes' t_slop, or is too fast for the band (Part 1 §4.2), `3` busy — the band is in use by the main
 bus or another link, or cannot share the devices with it (§8.2), `4` refused.
 
 `LINK_CLOSE` reasons: `0` finished, `1` no contact (§8.3), `2` errors.
@@ -396,12 +396,23 @@ bus or another link, or cannot share the devices with it (§8.2), `4` refused.
 ### 8.2 Choosing a band and profile
 
 A side link MUST use a band other than the main bus's, and other than any link
-the proposer has heard accepted and not closed. Where two bands' guard ranges
-overlap (bands A and C), each bit edge on one spills switching energy into the
-other's guard bins, and both buses MUST then use a profile with `TQ` of at
-least 5 ms (`T10` and slower). In the reference simulation A and C both at
-`T25` corrupt each other's frames; at `T10` and slower, and in every other
-pairing at any profile, neither notices the other.
+the proposer has heard accepted and not closed. Each bit edge on one bus spills
+switching energy across the main lobe of the other's edge window, so two buses
+can share devices only when every tone of each band is far enough from every
+frequency the other's detector measures (its tones and guards):
+
+```
+gap  ≥  1250 Hz · (1 ms / TQ)        TQ the shorter of the two buses'
+```
+
+the same rule a band's own tones obey (Part 1 §4.2). Bands A and C come within
+250 Hz of each other, so both buses MUST then use `TQ` of at least 5 ms (`T10`
+and slower). Band C's recessive tone is band E's upper guard, so C and E MUST
+NOT share devices at all. Every other pair may share at any profile both bands
+allow. The same holds between a proposed link and any link already in use. In
+the reference simulation A and C both at `T25` corrupt each other's frames, and
+C and E do at every profile; at `T10` A and C do not, nor does E with A, B or
+D, nor does any other pairing.
 
 The profile MUST cover both nodes' t_slop (Part 1 §5.6). The proposer knows
 only its own; the invited node, knowing both, MUST decline with reason `2` if

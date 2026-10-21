@@ -5,6 +5,7 @@
 import { Modem, checkSupport } from '../../src/tincan/modem.js';
 import {
   BANDS, PROFILES, DETECTOR_DEFAULTS, timing, maxRange, fastestProfileFor, longestRangeProfile, bandsCompatible,
+  minTqMs, profileFitsBand,
 } from '../../src/tincan/params.js';
 import { buildTransmission, formatFrame } from '../../src/tincan/frame.js';
 import {
@@ -13,7 +14,7 @@ import {
 } from '../../src/tincan/transport.js';
 import {
   $, el, hex, hexBytes, parseHexBytes, parseId, db, download, reportHeader, reportName,
-  LogView, topbar, escapeHtml, drawBits, drawMeter, fillMicrophones, micName, measuredLatency,
+  LogView, topbar, escapeHtml, drawBits, drawMeter, fillMicrophones, micName, measuredLatency, fitProfiles,
 } from '../ui.js';
 import { LinkEnd } from '../sidelink.js';
 
@@ -60,14 +61,14 @@ function describePhy() {
     range = `Arbitration good to about ${maxRange(profSel.value).toFixed(1)} m, if this device's own audio path is `
       + 'fast; <a href="../selftest/">measure it</a> in the Self-test to know.';
   } else if (maxRange(profSel.value, m.slopMs) > 0) {
-    const best = fastestProfileFor(m.slopMs);
+    const best = fastestProfileFor(m.slopMs, bandSel.value);
     const faster = timing(best).bitRate / t.bitRate;
     range = `Through ${escapeHtml(name)} this device hears itself ${m.ms.toFixed(1)} ms late (measured `
       + `${m.at.slice(0, 10)}), so arbitration is good to about ${maxRange(profSel.value, m.slopMs).toFixed(1)} m.`
       + (faster > 1 ? ` ${best} would be ${faster.toFixed(faster < 10 ? 1 : 0)}× faster, good to `
         + `${maxRange(best, measuredSlop(name, best).slopMs).toFixed(1)} m, if every node on the bus can use it too.` : '');
   } else {
-    const best = fastestProfileFor(m.slopMs);
+    const best = fastestProfileFor(m.slopMs, bandSel.value);
     range = `<b>Through ${escapeHtml(name)} this device hears itself ${m.ms.toFixed(1)} ms late (measured `
       + `${m.at.slice(0, 10)}), more than ${profSel.value}'s ${PROFILES[profSel.value].prop * PROFILES[profSel.value].tqMs} ms `
       + `PROP_SEG allows: it will misread its own bits.</b> `
@@ -77,10 +78,11 @@ function describePhy() {
     `${b.fR} Hz recessive, ${b.fD} Hz dominant. `
     + `${Math.round(t.bitRate)} bit/s — an 8-octet frame takes about `
     + `${(123 / t.bitRate).toFixed(1)} s of bus time. ${range}`
-    + (bandSel.value === 'A' ? ' <b>This band is audible.</b>' : '');
+    + (bandSel.value !== 'B' ? ' <b>This band is audible.</b>' : '')
+    + (minTqMs(bandSel.value) > 1 ? ` Band ${bandSel.value} needs ${Object.keys(PROFILES).find((p) => profileFitsBand(bandSel.value, p))} or slower.` : '');
   updateHints();
 }
-bandSel.addEventListener('change', describePhy);
+bandSel.addEventListener('change', () => { fitProfiles(profSel, bandSel.value); describePhy(); });
 profSel.addEventListener('change', describePhy);
 $('#mic').addEventListener('change', describePhy);
 describePhy();
@@ -268,7 +270,7 @@ function useMeasuredLatency() {
   if (!m) return;
   modem.measuredLatencyMs = m.ms;
   if (maxRange(profSel.value, modem.measuredSlopMs) > 0) return;
-  const best = fastestProfileFor(modem.measuredSlopMs);
+  const best = fastestProfileFor(modem.measuredSlopMs, bandSel.value);
   warnOnce('latency', `This device hears itself ${m.ms.toFixed(1)} ms late through ${micName(label)}, as the `
     + `self-test measured on ${m.at.slice(0, 10)}: more than ${profSel.value} allows, so it will misread its own `
     + `bits and every frame it sends will fail. `
@@ -671,7 +673,8 @@ function fillLinkChoices() {
     el('option', { value: k }, `${k} — ${Math.round(timing(p).bitRate)} bit/s`)));
   // The fastest this device's audio path allows, with another as slow.
   const slop = mySlop('T25');
-  prof.value = (PROFILES[keepP] && keepP) || (slop !== null ? fastestProfileFor(slop) : null) || 'T5';
+  prof.value = (PROFILES[keepP] && keepP) || (slop !== null ? fastestProfileFor(slop, band.value) : null) || 'T5';
+  fitProfiles(prof, band.value);
   describeLink();
 }
 
@@ -685,12 +688,13 @@ function describeLink() {
   const notes = [`${(t.bitRate / main.bitRate).toFixed(t.bitRate >= main.bitRate ? 1 : 2)}× the main bus's speed.`];
   if (slop !== null) notes.push(`Good to about ${maxRange(profile, slop).toFixed(1)} m between two devices as slow as this one.`);
   if (!bandsCompatible(bandSel.value, profSel.value, band, profile)) {
+    const slower = Object.keys(PROFILES).find((p) => bandsCompatible(bandSel.value, p, band, p));
     notes.push(`<b>Bands ${bandSel.value} and ${band} cannot share a device at these profiles</b> (Part 2 §8.2): `
-      + 'use T10 or slower on both, or another band.');
+      + (slower ? `use ${slower} or slower on both, or another band.` : 'use another band.'));
   }
   if (slop !== null && maxRange(profile, slop) <= 0) {
     notes.push(`<b>${profile} cannot cover this device's ${slop.toFixed(0)} ms audio path</b>; `
-      + `${fastestProfileFor(slop) ?? 'no profile'} is the fastest that can.`);
+      + `${fastestProfileFor(slop, band) ?? 'no profile'} is the fastest that can.`);
   } else if (slop === null) {
     notes.push('This device\'s audio path is not measured, so the peer will judge the timing alone.');
   }
@@ -707,6 +711,7 @@ function fillLinkPeers() {
   if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
 }
 
+$('#linkband').addEventListener('change', () => fitProfiles($('#linkprofile'), $('#linkband').value));
 for (const s of ['#linkband', '#linkprofile', '#mic']) $(s).addEventListener('change', describeLink);
 bandSel.addEventListener('change', fillLinkChoices);
 profSel.addEventListener('change', describeLink);
@@ -758,7 +763,7 @@ function onProposal(rec) {
   const canUseBand = (b) => b !== 'B' || (modem?.ctx?.sampleRate ?? 48000) >= 44100;
   const reason = link ? DECLINE.BUSY : assessProposal(rec, {
     mainBand: bandSel.value, mainProfile: profSel.value, slopMs: mySlop(rec.profile ?? profSel.value),
-    bandsInUse: session.bandsInUse(), canUseBand,
+    linksInUse: session.linksInUse(), canUseBand,
   });
   const who = peers.get(rec.proposer)?.callsign || `node ${rec.proposer}`;
   const what = `band ${rec.band}, ${rec.profile}`;

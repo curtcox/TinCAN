@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TinCAN Bands</title>
-<meta name="description" content="How TinCAN's four bands compare: how loud each seems and to whom, how far it carries, and how much data it can carry.">
+<meta name="description" content="How TinCAN's five bands compare: how loud each seems and to whom, how far it carries, and how much data it can carry.">
 <link rel="stylesheet" href="../../style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>🥫</text></svg>">
 </head>
@@ -14,10 +14,12 @@
 <main class="wrap">
   <h1 style="margin:0 0 .2rem;font-size:1.6rem;letter-spacing:-.02em">Bands</h1>
   <p style="margin:0 0 1.5rem;color:var(--dim)">
-    Every TinCAN band is two tones, recessive and dominant, 1250 Hz apart, with a guard tone either
-    side to measure the noise (<a href="../../spec/tincan-1.0.html#42-band-plans">Part 1 §4.2</a>). The band decides
-    who can hear the bus, how far it carries and what it competes with. It does not decide how fast the
-    bus runs: the bit-timing profile does, and every band runs every profile at the same rate.
+    Every TinCAN band is two tones, recessive and dominant, with a guard tone either side to measure the
+    noise (<a href="../../spec/tincan-1.0.html#42-band-plans">Part 1 §4.2</a>). The band decides who can hear
+    the bus, how far it carries and what it competes with. It barely decides how fast the bus runs: the
+    bit-timing profile does, at the same rate on every band. The one exception is band E, whose tones sit
+    250 Hz apart instead of 1250 Hz so as to fit below 1 kHz: telling them apart takes five times longer,
+    so it runs T10 and slower only.
   </p>
 
   <div class="panel">
@@ -70,7 +72,7 @@
 
   <div class="panel">
     <h2>How much each band can carry</h2>
-    <p class="note" style="margin-top:0">A profile sets the bit rate, the same on every band. The bit time has
+    <p class="note" style="margin-top:0">A profile sets the bit rate, the same on every band that can run it. The bit time has
       to cover every node's audio delay and the distance between them, because each bit is arbitrated
       (<a href="../../spec/tincan-1.0.html#56-range-limit">Part 1 §5.6</a>), so TinCAN uses a sliver of
       what each band's slot could carry. What a band adds is a channel of its own: two nodes that can do

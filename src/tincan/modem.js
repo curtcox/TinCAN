@@ -58,8 +58,8 @@ export async function audioConstraints(deviceId) {
 export class Modem extends EventTarget {
   /**
    * @param {object} [opts]
-   * @param {'A'|'B'|'C'|'D'} [opts.band]
-   * @param {'T100'|'T50'|'T25'|'T10'|'T5'} [opts.profile]
+   * @param {'A'|'B'|'C'|'D'|'E'} [opts.band]
+   * @param {'T100'|'T50'|'T25'|'T10'|'T5'|'T4'|'T2'} [opts.profile]
    * @param {'node'|'listener'} [opts.mode]
    * @param {number} [opts.amplitude]
    * @param {string} [opts.name]

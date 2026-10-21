@@ -4,7 +4,7 @@
  */
 
 import {
-  BANDS, PROFILES, timing, maxRange, bandsCompatible, bandById, profileById,
+  BANDS, PROFILES, timing, maxRange, bandsCompatible, profileFitsBand, bandById, profileById,
 } from './params.js';
 
 /* ------------------------------------------------------------------ */
@@ -251,7 +251,7 @@ export const DECLINE = { BAND: 1, TIMING: 2, BUSY: 3, REFUSED: 4 };
 export const CLOSE = { FINISHED: 0, NO_CONTACT: 1, ERRORS: 2 };
 export const DECLINE_TEXT = {
   [DECLINE.BAND]: 'band not usable there',
-  [DECLINE.TIMING]: 'the profile cannot cover both audio paths',
+  [DECLINE.TIMING]: 'the profile cannot cover both audio paths, or is too fast for the band',
   [DECLINE.BUSY]: 'band busy, or cannot share the devices with the main bus',
   [DECLINE.REFUSED]: 'refused',
 };
@@ -336,14 +336,20 @@ export function linkTimeout(profile) {
  * @param {string} here.mainProfile
  * @param {number|null} [here.slopMs] this node's measured t_slop
  * @param {string[]} [here.bandsInUse] by other links it has heard accepted
+ * @param {{band:string, profile:string}[]} [here.linksInUse] the same, with
+ *   their profiles, so that a band they cannot share a device with is busy too
  * @param {(band:string) => boolean} [here.canUseBand]
  */
-export function assessProposal(proposal, { mainBand, mainProfile, slopMs: mine = null, bandsInUse = [], canUseBand = () => true }) {
+export function assessProposal(proposal, {
+  mainBand, mainProfile, slopMs: mine = null, bandsInUse = [], linksInUse = [], canUseBand = () => true,
+}) {
   const { band, profile } = proposal;
   if (!band || !profile || !canUseBand(band)) return DECLINE.BAND;
-  if (band === mainBand || bandsInUse.includes(band) || !bandsCompatible(mainBand, mainProfile, band, profile)) {
+  if (band === mainBand || bandsInUse.includes(band) || !bandsCompatible(mainBand, mainProfile, band, profile)
+    || linksInUse.some((l) => !bandsCompatible(l.band, l.profile, band, profile))) {
     return DECLINE.BUSY;
   }
+  if (!profileFitsBand(band, profile)) return DECLINE.TIMING;
   const slops = [proposal.slopMs, mine].filter((v) => v != null);
   if (slops.length && maxRange(profile, Math.max(...slops) + timing(profile).tq * 250) <= 0) return DECLINE.TIMING;
   return null;
@@ -435,7 +441,12 @@ export class Session {
 
   /** Bands of links accepted and not closed, so as not to propose them. */
   bandsInUse() {
-    return [...this.links.values()].filter((l) => l.state === 'accepted').map((l) => l.band);
+    return this.linksInUse().map((l) => l.band);
+  }
+
+  /** Links accepted and not closed: {band, profile} each. */
+  linksInUse() {
+    return [...this.links.values()].filter((l) => l.state === 'accepted').map(({ band, profile }) => ({ band, profile }));
   }
 
   _onControl(c, source) {
